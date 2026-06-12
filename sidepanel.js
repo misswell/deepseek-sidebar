@@ -21,6 +21,7 @@ function applyZoom(zoom) {
   iframe.style.width = `${100 / scale}%`;
   iframe.style.height = `${100 / scale}%`;
   zoomLabel.textContent = `${currentZoom}%`;
+  iframe.style.visibility = 'visible';
   chrome.storage.local.set({ [STORAGE_KEY]: currentZoom });
 }
 
@@ -29,6 +30,8 @@ chrome.storage.local.get(STORAGE_KEY, (result) => {
   const saved = result[STORAGE_KEY];
   if (saved && saved >= ZOOM_MIN && saved <= ZOOM_MAX) {
     applyZoom(saved);
+  } else {
+    applyZoom(100);
   }
 });
 
