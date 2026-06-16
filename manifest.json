@@ -55,8 +55,8 @@
         "ua-override.js"
       ],
       "run_at": "document_start",
-      "all_frames": true,
-      "world": "MAIN"
+      "world": "MAIN",
+      "all_frames": true
     }
   ]
 }
