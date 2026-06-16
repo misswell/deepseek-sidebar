@@ -1,3 +1,6 @@
+const LOG_PREFIX = '[SIDEPANEL]';
+const log = (...args) => { try { console.log(LOG_PREFIX, ...args); } catch(e) {} };
+
 const iframe = document.getElementById('webview');
 const loading = document.getElementById('loading');
 const zoomIn = document.getElementById('zoom-in');
@@ -19,11 +22,14 @@ const APPS = {
 };
 
 let currentZoom = 100;
+let currentApp = null;
 const appButtons = document.querySelectorAll('.app-btn');
 
 function switchApp(appId) {
   const app = APPS[appId];
   if (!app) return;
+  log('switchApp:', appId, '->', app.url);
+  currentApp = appId;
   appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === appId));
   iframe.src = app.url;
   applyZoom(currentZoom);
@@ -54,13 +60,62 @@ document.addEventListener('keydown', (e) => {
   else if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); applyZoom(currentZoom - ZOOM_STEP); }
 });
 
+// ---- IFRAME NAVIGATION MONITORING ----
+let iframeLoadCount = 0;
+let lastIframeSrc = '';
 
-iframe.addEventListener('load', () => loading.classList.add('hidden'));
+iframe.addEventListener('load', () => {
+  iframeLoadCount++;
+  const newSrc = iframe.src;
+  log('iframe LOAD #' + iframeLoadCount, 'src:', newSrc, 'previous:', lastIframeSrc);
+  if (lastIframeSrc && newSrc !== lastIframeSrc) {
+    log('!!! IFRAME SRC CHANGED !!! from:', lastIframeSrc, 'to:', newSrc);
+    log('!!! Stack:', new Error().stack);
+  }
+  lastIframeSrc = newSrc;
+  loading.classList.add('hidden');
+});
+
+// Also monitor via contentWindow unload
+const monitorIframeUnload = () => {
+  try {
+    const win = iframe.contentWindow;
+    if (win) {
+      win.addEventListener('unload', () => {
+        log('!!! IFRAME contentWindow UNLOAD !!! src:', iframe.src);
+      });
+      win.addEventListener('beforeunload', () => {
+        log('!!! IFRAME contentWindow BEFOREUNLOAD !!! src:', iframe.src);
+      });
+    }
+  } catch(e) {
+    // cross-origin, expected
+  }
+};
+iframe.addEventListener('load', monitorIframeUnload);
+
+// Poll iframe src for changes
+setInterval(() => {
+  if (iframe.src !== lastIframeSrc) {
+    log('!!! IFRAME SRC CHANGED (poll) !!! from:', lastIframeSrc, 'to:', iframe.src);
+    log('!!! Stack:', new Error().stack);
+    lastIframeSrc = iframe.src;
+  }
+}, 500);
+
+// Monitor visibility of sidepanel itself
+document.addEventListener('visibilitychange', () => {
+  log('!!! SIDEPANEL visibilitychange:', document.visibilityState, 'hidden:', document.hidden);
+});
+
 setTimeout(() => loading.classList.add('hidden'), 8000);
+
+log('sidepanel initialized');
 
 // Restore saved state (last, in case storage API fails)
 try {
   chrome.storage.local.get([ZOOM_KEY, APP_KEY], (result) => {
+    log('restored state:', result);
     switchApp(result[APP_KEY] || 'deepseek');
     applyZoom(result[ZOOM_KEY] || 100);
   });

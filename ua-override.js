@@ -2,20 +2,12 @@
 (function() {
   'use strict';
 
-  // Detect if we're in the main frame or a sub-frame
   let isMainFrame = false;
   try {
-    // window.self !== window.top means we're in some kind of frame
-    if (window.self !== window.top) {
-      // window.parent === window.top means we're a direct child of top
-      // (the main qianwen frame inside the extension iframe)
-      if (window.parent === window.top) {
-        isMainFrame = true;
-      }
+    if (window.self !== window.top && window.parent === window.top) {
+      isMainFrame = true;
     }
-  } catch(e) {
-    // Cross-origin access blocked — we're in a sub-frame, skip
-  }
+  } catch(e) {}
 
   if (!isMainFrame) return;
 
@@ -26,29 +18,19 @@
 
   log('injected at', document.readyState, 'URL:', location.href);
 
-  // ---- Mobile UA override for qianwen ----
+  // ---- Mobile UA override ----
   const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 
   Object.defineProperty(Navigator.prototype, 'userAgent', {
-    get: () => MOBILE_UA,
-    configurable: true,
-    enumerable: true
+    get: () => MOBILE_UA, configurable: true, enumerable: true
   });
-  log('userAgent override installed');
-
   Object.defineProperty(Navigator.prototype, 'platform', {
-    get: () => 'iPhone',
-    configurable: true,
-    enumerable: true
+    get: () => 'iPhone', configurable: true, enumerable: true
   });
-
   Object.defineProperty(Navigator.prototype, 'maxTouchPoints', {
-    get: () => 5,
-    configurable: true,
-    enumerable: true
+    get: () => 5, configurable: true, enumerable: true
   });
 
-  // Provide a valid mobile userAgentData object
   try {
     const mobileUAData = {
       brands: [
@@ -59,62 +41,75 @@
       mobile: true,
       platform: 'Android',
       getHighEntropyValues: () => Promise.resolve({
-        architecture: '',
-        bitness: '',
-        model: '',
-        platformVersion: '',
-        uaFullVersion: '',
-        fullVersionList: []
+        architecture: '', bitness: '', model: '',
+        platformVersion: '', uaFullVersion: '', fullVersionList: []
       }),
       toJSON: () => ({ brands: mobileUAData.brands, mobile: true, platform: 'Android' })
     };
     Object.defineProperty(Navigator.prototype, 'userAgentData', {
-      get: () => mobileUAData,
-      configurable: true,
-      enumerable: true
+      get: () => mobileUAData, configurable: true, enumerable: true
     });
-    log('userAgentData override installed');
+  } catch(e) {}
+
+  log('UA overrides installed');
+
+  // ---- Hide the fact that we're in an iframe ----
+  // Shadow window.top and window.parent to point to self
+  try {
+    Object.defineProperty(window, 'top', {
+      get: () => window.self, configurable: true, enumerable: true
+    });
+    Object.defineProperty(window, 'parent', {
+      get: () => window.self, configurable: true, enumerable: true
+    });
+    log('window.top/parent shadowed');
   } catch(e) {
-    log('userAgentData override FAILED:', e.message);
+    log('window.top/parent shadow FAILED:', e.message);
   }
 
-  // ---- Block visibilitychange from triggering page reload ----
+  // Block frameElement
+  try {
+    Object.defineProperty(window, 'frameElement', {
+      get: () => null, configurable: true, enumerable: true
+    });
+  } catch(e) {}
+
+  // ---- Block visibility/focus/blur events that trigger reload ----
   try {
     Object.defineProperty(Document.prototype, 'visibilityState', {
-      get: () => 'visible',
-      configurable: true,
-      enumerable: true
+      get: () => 'visible', configurable: true, enumerable: true
     });
-  } catch(e) {}
-
-  try {
     Object.defineProperty(Document.prototype, 'hidden', {
-      get: () => false,
-      configurable: true,
-      enumerable: true
+      get: () => false, configurable: true, enumerable: true
     });
   } catch(e) {}
 
-  // Intercept addEventListener to block visibilitychange handlers
+  // Block document.hasFocus() — always return true
+  try {
+    Document.prototype.hasFocus = () => true;
+  } catch(e) {}
+
+  // Intercept addEventListener to block problematic event types
+  const blockedEvents = ['visibilitychange', 'focus', 'blur', 'pageshow', 'pagehide'];
   const origAddEventListener = EventTarget.prototype.addEventListener;
   EventTarget.prototype.addEventListener = function(type, listener, options) {
-    if (type === 'visibilitychange') return;
+    if (blockedEvents.includes(type)) return;
     return origAddEventListener.call(this, type, listener, options);
   };
 
-  // ---- Monitor for navigation attempts ----
+  // ---- Monitor for navigation ----
   let lastHref = location.href;
   setInterval(() => {
     if (location.href !== lastHref) {
-      log('!!! NAVIGATION DETECTED:', lastHref, '->', location.href);
+      log('!!! NAVIGATION:', lastHref, '->', location.href);
       log('!!! Stack:', new Error().stack);
       lastHref = location.href;
     }
   }, 200);
 
   window.addEventListener('beforeunload', () => {
-    log('!!! beforeunload EVENT FIRED !!!');
+    log('!!! beforeunload fired !!!');
   });
 
-  log('all monitors installed');
+  log('all monitors installed, waiting...');
 })();
