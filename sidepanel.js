@@ -1,5 +1,4 @@
 const iframe = document.getElementById('webview');
-const container = document.getElementById('webview-container');
 const loading = document.getElementById('loading');
 const zoomIn = document.getElementById('zoom-in');
 const zoomOut = document.getElementById('zoom-out');
@@ -55,8 +54,6 @@ document.addEventListener('keydown', (e) => {
   else if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); applyZoom(currentZoom - ZOOM_STEP); }
 });
 
-// Recalculate on container resize
-new ResizeObserver(() => applyZoom(currentZoom)).observe(container);
 
 iframe.addEventListener('load', () => loading.classList.add('hidden'));
 setTimeout(() => loading.classList.add('hidden'), 8000);
