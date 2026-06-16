@@ -132,7 +132,6 @@
       ]
     },
     "condition": {
-      "urlFilter": "||chat.qianwen.ai",
       "resourceTypes": [
         "sub_frame",
         "xmlhttprequest"

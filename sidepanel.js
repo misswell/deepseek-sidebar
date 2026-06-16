@@ -13,7 +13,7 @@ const ZOOM_MAX = 200;
 
 const APPS = {
   deepseek: { url: 'https://chat.deepseek.com/' },
-  qianwen: { url: 'https://chat.qianwen.ai/' },
+  qianwen: { url: 'https://tongyi.aliyun.com/qianwen/' },
   chatgpt: { url: 'https://chatgpt.com/' },
   gemini: { url: 'https://gemini.google.com/app' }
 };
