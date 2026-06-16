@@ -27,9 +27,3 @@ try {
     enumerable: true
   });
 } catch(e) {}
-
-// Prevent frame-busting: make window.top / window.parent point to self
-try {
-  Object.defineProperty(window, 'top', { get: () => window.self });
-  Object.defineProperty(window, 'parent', { get: () => window.self });
-} catch(e) {}
