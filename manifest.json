@@ -3,11 +3,17 @@
   "name": "AI Sidebar",
   "version": "1.1",
   "description": "Open AI chat mobile sites in Chrome sidebar with quick switch and zoom support",
-  "permissions": ["sidePanel", "activeTab", "storage", "declarativeNetRequest"],
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "storage",
+    "declarativeNetRequest"
+  ],
   "host_permissions": [
     "https://chat.deepseek.com/*",
     "https://tongyi.aliyun.com/*",
     "https://qianwen.aliyun.com/*",
+    "https://chat.qianwen.ai/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*"
   ],
@@ -31,10 +37,12 @@
     "128": "icons/icon128.png"
   },
   "declarative_net_request": {
-    "rule_resources": [{
-      "id": "remove_headers",
-      "enabled": true,
-      "path": "rules.json"
-    }]
+    "rule_resources": [
+      {
+        "id": "remove_headers",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
   }
 }

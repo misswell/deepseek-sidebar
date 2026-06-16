@@ -5,14 +5,26 @@
     "action": {
       "type": "modifyHeaders",
       "responseHeaders": [
-        { "header": "X-Frame-Options", "operation": "remove" },
-        { "header": "Content-Security-Policy", "operation": "remove" },
-        { "header": "Content-Security-Policy-Report-Only", "operation": "remove" }
+        {
+          "header": "X-Frame-Options",
+          "operation": "remove"
+        },
+        {
+          "header": "Content-Security-Policy",
+          "operation": "remove"
+        },
+        {
+          "header": "Content-Security-Policy-Report-Only",
+          "operation": "remove"
+        }
       ]
     },
     "condition": {
       "urlFilter": "||chat.deepseek.com",
-      "resourceTypes": ["sub_frame", "xmlhttprequest"]
+      "resourceTypes": [
+        "sub_frame",
+        "xmlhttprequest"
+      ]
     }
   },
   {
@@ -21,14 +33,26 @@
     "action": {
       "type": "modifyHeaders",
       "responseHeaders": [
-        { "header": "X-Frame-Options", "operation": "remove" },
-        { "header": "Content-Security-Policy", "operation": "remove" },
-        { "header": "Content-Security-Policy-Report-Only", "operation": "remove" }
+        {
+          "header": "X-Frame-Options",
+          "operation": "remove"
+        },
+        {
+          "header": "Content-Security-Policy",
+          "operation": "remove"
+        },
+        {
+          "header": "Content-Security-Policy-Report-Only",
+          "operation": "remove"
+        }
       ]
     },
     "condition": {
       "urlFilter": "||tongyi.aliyun.com",
-      "resourceTypes": ["sub_frame", "xmlhttprequest"]
+      "resourceTypes": [
+        "sub_frame",
+        "xmlhttprequest"
+      ]
     }
   },
   {
@@ -37,14 +61,26 @@
     "action": {
       "type": "modifyHeaders",
       "responseHeaders": [
-        { "header": "X-Frame-Options", "operation": "remove" },
-        { "header": "Content-Security-Policy", "operation": "remove" },
-        { "header": "Content-Security-Policy-Report-Only", "operation": "remove" }
+        {
+          "header": "X-Frame-Options",
+          "operation": "remove"
+        },
+        {
+          "header": "Content-Security-Policy",
+          "operation": "remove"
+        },
+        {
+          "header": "Content-Security-Policy-Report-Only",
+          "operation": "remove"
+        }
       ]
     },
     "condition": {
       "urlFilter": "||chatgpt.com",
-      "resourceTypes": ["sub_frame", "xmlhttprequest"]
+      "resourceTypes": [
+        "sub_frame",
+        "xmlhttprequest"
+      ]
     }
   },
   {
@@ -53,14 +89,54 @@
     "action": {
       "type": "modifyHeaders",
       "responseHeaders": [
-        { "header": "X-Frame-Options", "operation": "remove" },
-        { "header": "Content-Security-Policy", "operation": "remove" },
-        { "header": "Content-Security-Policy-Report-Only", "operation": "remove" }
+        {
+          "header": "X-Frame-Options",
+          "operation": "remove"
+        },
+        {
+          "header": "Content-Security-Policy",
+          "operation": "remove"
+        },
+        {
+          "header": "Content-Security-Policy-Report-Only",
+          "operation": "remove"
+        }
       ]
     },
     "condition": {
       "urlFilter": "||gemini.google.com",
-      "resourceTypes": ["sub_frame", "xmlhttprequest"]
+      "resourceTypes": [
+        "sub_frame",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 5,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "responseHeaders": [
+        {
+          "header": "X-Frame-Options",
+          "operation": "remove"
+        },
+        {
+          "header": "Content-Security-Policy",
+          "operation": "remove"
+        },
+        {
+          "header": "Content-Security-Policy-Report-Only",
+          "operation": "remove"
+        }
+      ]
+    },
+    "condition": {
+      "urlFilter": "||chat.qianwen.ai",
+      "resourceTypes": [
+        "sub_frame",
+        "xmlhttprequest"
+      ]
     }
   }
 ]
