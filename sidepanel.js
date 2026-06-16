@@ -2,7 +2,7 @@ const iframe = document.getElementById('webview');
 const loading = document.getElementById('loading');
 const zoomIn = document.getElementById('zoom-in');
 const zoomOut = document.getElementById('zoom-out');
-const zoomReset = document.getElementById('zoom-reset');
+const reloadBtn = document.getElementById('zoom-reset');
 const zoomLabel = document.getElementById('zoom-label');
 
 const ZOOM_KEY = 'deepseek-sidebar-zoom';
@@ -52,12 +52,11 @@ chrome.storage.local.get([ZOOM_KEY, APP_KEY], (result) => {
 
 zoomIn.addEventListener('click', () => applyZoom(currentZoom + ZOOM_STEP));
 zoomOut.addEventListener('click', () => applyZoom(currentZoom - ZOOM_STEP));
-zoomReset.addEventListener('click', () => applyZoom(100));
+reloadBtn.addEventListener('click', () => { iframe.src = iframe.src; });
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); applyZoom(currentZoom + ZOOM_STEP); }
   else if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); applyZoom(currentZoom - ZOOM_STEP); }
-  else if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); applyZoom(100); }
 });
 
 iframe.addEventListener('load', () => loading.classList.add('hidden'));
