@@ -14,7 +14,9 @@
     "https://tongyi.aliyun.com/*",
     "https://qianwen.aliyun.com/*",
     "https://chatgpt.com/*",
-    "https://gemini.google.com/*"
+    "https://gemini.google.com/*",
+    "https://www.qianwen.com/*",
+    "https://qianwen.com/*"
   ],
   "action": {
     "default_title": "Open AI Sidebar",
