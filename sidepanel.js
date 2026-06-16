@@ -2,7 +2,7 @@ const iframe = document.getElementById('webview');
 const loading = document.getElementById('loading');
 const zoomIn = document.getElementById('zoom-in');
 const zoomOut = document.getElementById('zoom-out');
-const reloadBtn = document.getElementById('zoom-reset');
+const reloadBtn = document.getElementById('refresh');
 const zoomLabel = document.getElementById('zoom-label');
 
 const ZOOM_KEY = 'deepseek-sidebar-zoom';
@@ -27,12 +27,8 @@ function switchApp(appId) {
   appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === appId));
   iframe.src = app.url;
   applyZoom(currentZoom);
-  chrome.storage.local.set({ [APP_KEY]: appId });
+  try { chrome.storage.local.set({ [APP_KEY]: appId }); } catch (e) {}
 }
-
-appButtons.forEach(btn => {
-  btn.addEventListener('click', () => switchApp(btn.dataset.app));
-});
 
 function applyZoom(zoom) {
   currentZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
@@ -41,19 +37,17 @@ function applyZoom(zoom) {
   iframe.style.width = (100 / scale) + '%';
   iframe.style.height = (100 / scale) + '%';
   zoomLabel.textContent = currentZoom + '%';
-  chrome.storage.local.set({ [ZOOM_KEY]: currentZoom });
+  try { chrome.storage.local.set({ [ZOOM_KEY]: currentZoom }); } catch (e) {}
 }
 
-// Restore saved state
-chrome.storage.local.get([ZOOM_KEY, APP_KEY], (result) => {
-  switchApp(result[APP_KEY] || 'deepseek');
-  applyZoom(result[ZOOM_KEY] || 100);
+// Bind all event listeners first (before any potentially failing async/storage calls)
+appButtons.forEach(btn => {
+  btn.addEventListener('click', () => switchApp(btn.dataset.app));
 });
-
 zoomIn.addEventListener('click', () => applyZoom(currentZoom + ZOOM_STEP));
 zoomOut.addEventListener('click', () => applyZoom(currentZoom - ZOOM_STEP));
-reloadBtn.addEventListener("click", () => { iframe.src = iframe.src; });
-zoomLabel.addEventListener("dblclick", () => applyZoom(100));
+reloadBtn.addEventListener('click', () => { iframe.src = iframe.src; });
+zoomLabel.addEventListener('dblclick', () => applyZoom(100));
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); applyZoom(currentZoom + ZOOM_STEP); }
@@ -62,3 +56,14 @@ document.addEventListener('keydown', (e) => {
 
 iframe.addEventListener('load', () => loading.classList.add('hidden'));
 setTimeout(() => loading.classList.add('hidden'), 8000);
+
+// Restore saved state (last, in case storage API fails)
+try {
+  chrome.storage.local.get([ZOOM_KEY, APP_KEY], (result) => {
+    switchApp(result[APP_KEY] || 'deepseek');
+    applyZoom(result[ZOOM_KEY] || 100);
+  });
+} catch (e) {
+  switchApp('deepseek');
+  applyZoom(100);
+}
