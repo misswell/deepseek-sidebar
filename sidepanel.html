@@ -43,7 +43,7 @@
     .app-btn:hover { background: #2a2a4a; }
     .app-btn.active { border-color: rgba(255,255,255,0.5); background: #2a2a4a; }
 
-    .app-btn svg { width: 18px; height: 18px; }
+    .app-btn img { width: 18px; height: 18px; border-radius: 2px; }
 
     .zoom-controls {
       display: flex;
@@ -121,16 +121,16 @@
   <div id="toolbar">
     <div class="app-switcher">
       <button class="app-btn active" data-app="deepseek" title="DeepSeek">
-        <svg viewBox="0 0 128 128" fill="none"><circle cx="64" cy="64" r="56" fill="#4a6cf7"/><path d="M44 64C44 52.954 52.954 44 64 44C75.046 44 84 52.954 84 64C84 75.046 75.046 84 64 84" stroke="white" stroke-width="6" stroke-linecap="round"/><circle cx="64" cy="64" r="6" fill="white"/></svg>
+        <img src="https://chat.deepseek.com/favicon.ico" alt="DeepSeek">
       </button>
       <button class="app-btn" data-app="qianwen" title="千问">
-        <svg viewBox="0 0 128 128" fill="none"><circle cx="64" cy="64" r="56" fill="#615BFF"/><text x="64" y="78" text-anchor="middle" fill="white" font-size="48" font-weight="bold" font-family="sans-serif">问</text></svg>
+        <img src="https://www.qianwen.com/favicon.ico" alt="千问">
       </button>
       <button class="app-btn" data-app="chatgpt" title="ChatGPT">
-        <svg viewBox="0 0 128 128" fill="none"><circle cx="64" cy="64" r="56" fill="#10a37f"/><path d="M82.5 58c2.4-7.2-0.6-15-7.2-19-6.4-3.8-14.6-2.8-20 2.2-5.4-4.8-13.6-5.6-20-1.6-6.6 4.2-9.2 12.2-6.4 19.4-6.6 4.2-9.4 12.2-6.6 19.4 2.8 7 10.2 11.2 17.8 10.2 2.2 7 9.2 11.6 16.8 11 7.6 0.4 14.4-4.4 16.4-11.4 7.4-0.2 14-4.8 16.4-11.6 2.6-7-0.2-14.8-6.2-18.6z" fill="white" opacity="0.9"/></svg>
+        <img src="https://chatgpt.com/favicon.ico" alt="ChatGPT">
       </button>
       <button class="app-btn" data-app="gemini" title="Gemini">
-        <svg viewBox="0 0 128 128" fill="none"><circle cx="64" cy="64" r="56" fill="#8E75B2"/><path d="M64 28l12 20-12 20-12-20z" fill="#FFD700"/><path d="M64 60l12 20-12 20-12-20z" fill="#4285F4"/><path d="M40 48h48l-12 20H28z" fill="#EA4335" opacity="0.8"/><path d="M40 60h48l-12-20H28z" fill="#34A853" opacity="0.8"/></svg>
+        <img src="https://gemini.google.com/favicon.ico" alt="Gemini">
       </button>
     </div>
     <div class="zoom-controls">
