@@ -1,12 +1,18 @@
 {
   "manifest_version": 3,
-  "name": "DeepSeek Sidebar",
-  "version": "1.0",
-  "description": "Open DeepSeek mobile in Chrome sidebar with zoom support",
+  "name": "AI Sidebar",
+  "version": "1.1",
+  "description": "Open AI chat mobile sites in Chrome sidebar with quick switch and zoom support",
   "permissions": ["sidePanel", "activeTab", "storage", "declarativeNetRequest"],
-  "host_permissions": ["https://chat.deepseek.com/*"],
+  "host_permissions": [
+    "https://chat.deepseek.com/*",
+    "https://tongyi.aliyun.com/*",
+    "https://qianwen.aliyun.com/*",
+    "https://chatgpt.com/*",
+    "https://gemini.google.com/*"
+  ],
   "action": {
-    "default_title": "Open DeepSeek Sidebar",
+    "default_title": "Open AI Sidebar",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
