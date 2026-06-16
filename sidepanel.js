@@ -1,4 +1,5 @@
 const iframe = document.getElementById('webview');
+const container = document.getElementById('webview-container');
 const loading = document.getElementById('loading');
 const zoomIn = document.getElementById('zoom-in');
 const zoomOut = document.getElementById('zoom-out');
@@ -10,10 +11,11 @@ const APP_KEY = 'deepseek-sidebar-app';
 const ZOOM_STEP = 10;
 const ZOOM_MIN = 30;
 const ZOOM_MAX = 200;
+const MOBILE_WIDTH = 430; // fixed virtual width so pages render mobile layout
 
 const APPS = {
   deepseek: { url: 'https://chat.deepseek.com/' },
-  qianwen: { url: 'https://m.qianwen.com/' },
+  qianwen: { url: 'https://www.qianwen.com/' },
   chatgpt: { url: 'https://chatgpt.com/' },
   gemini: { url: 'https://gemini.google.com/app' }
 };
@@ -32,10 +34,15 @@ function switchApp(appId) {
 
 function applyZoom(zoom) {
   currentZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
-  const scale = currentZoom / 100;
+  const containerWidth = container.clientWidth;
+  const containerHeight = container.clientHeight;
+  if (!containerWidth || !containerHeight) return;
+  const baseScale = containerWidth / MOBILE_WIDTH;
+  const userScale = currentZoom / 100;
+  const scale = baseScale * userScale;
+  iframe.style.width = MOBILE_WIDTH + 'px';
+  iframe.style.height = (containerHeight / scale) + 'px';
   iframe.style.transform = 'scale(' + scale + ')';
-  iframe.style.width = (100 / scale) + '%';
-  iframe.style.height = (100 / scale) + '%';
   zoomLabel.textContent = currentZoom + '%';
   try { chrome.storage.local.set({ [ZOOM_KEY]: currentZoom }); } catch (e) {}
 }
@@ -53,6 +60,9 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); applyZoom(currentZoom + ZOOM_STEP); }
   else if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); applyZoom(currentZoom - ZOOM_STEP); }
 });
+
+// Recalculate on container resize
+new ResizeObserver(() => applyZoom(currentZoom)).observe(container);
 
 iframe.addEventListener('load', () => loading.classList.add('hidden'));
 setTimeout(() => loading.classList.add('hidden'), 8000);
