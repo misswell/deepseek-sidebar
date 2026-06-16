@@ -15,7 +15,6 @@
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
     "https://www.qianwen.com/*",
-    "https://m.qianwen.com/*",
     "https://qianwen.com/*"
   ],
   "action": {
@@ -49,9 +48,6 @@
   "content_scripts": [
     {
       "matches": [
-        "https://chat.deepseek.com/*",
-        "https://chatgpt.com/*",
-        "https://gemini.google.com/*",
         "https://www.qianwen.com/*",
         "https://qianwen.com/*"
       ],
