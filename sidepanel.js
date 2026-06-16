@@ -52,7 +52,8 @@ chrome.storage.local.get([ZOOM_KEY, APP_KEY], (result) => {
 
 zoomIn.addEventListener('click', () => applyZoom(currentZoom + ZOOM_STEP));
 zoomOut.addEventListener('click', () => applyZoom(currentZoom - ZOOM_STEP));
-reloadBtn.addEventListener('click', () => { iframe.src = iframe.src; });
+reloadBtn.addEventListener("click", () => { iframe.src = iframe.src; });
+zoomLabel.addEventListener("dblclick", () => applyZoom(100));
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); applyZoom(currentZoom + ZOOM_STEP); }
