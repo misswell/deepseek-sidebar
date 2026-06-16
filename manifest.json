@@ -11,8 +11,6 @@
   ],
   "host_permissions": [
     "https://chat.deepseek.com/*",
-    "https://tongyi.aliyun.com/*",
-    "https://qianwen.aliyun.com/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
     "https://www.qianwen.com/*",

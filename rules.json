@@ -48,7 +48,7 @@
       ]
     },
     "condition": {
-      "urlFilter": "||tongyi.aliyun.com",
+      "urlFilter": "||chatgpt.com",
       "resourceTypes": [
         "sub_frame",
         "xmlhttprequest"
@@ -76,7 +76,7 @@
       ]
     },
     "condition": {
-      "urlFilter": "||chatgpt.com",
+      "urlFilter": "||gemini.google.com",
       "resourceTypes": [
         "sub_frame",
         "xmlhttprequest"
@@ -104,34 +104,6 @@
       ]
     },
     "condition": {
-      "urlFilter": "||gemini.google.com",
-      "resourceTypes": [
-        "sub_frame",
-        "xmlhttprequest"
-      ]
-    }
-  },
-  {
-    "id": 5,
-    "priority": 1,
-    "action": {
-      "type": "modifyHeaders",
-      "responseHeaders": [
-        {
-          "header": "X-Frame-Options",
-          "operation": "remove"
-        },
-        {
-          "header": "Content-Security-Policy",
-          "operation": "remove"
-        },
-        {
-          "header": "Content-Security-Policy-Report-Only",
-          "operation": "remove"
-        }
-      ]
-    },
-    "condition": {
       "urlFilter": "||qianwen.com",
       "resourceTypes": [
         "sub_frame",
@@ -140,7 +112,7 @@
     }
   },
   {
-    "id": 6,
+    "id": 5,
     "priority": 1,
     "action": {
       "type": "modifyHeaders",
