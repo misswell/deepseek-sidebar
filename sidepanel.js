@@ -38,6 +38,22 @@ const APPS = {
 let currentZoom = 100;
 let currentApp = 'deepseek';
 
+const hasStorage = !!(chrome && chrome.storage && chrome.storage.local);
+
+function storageGet(keys, callback) {
+  if (hasStorage) {
+    chrome.storage.local.get(keys, callback);
+  } else {
+    callback({});
+  }
+}
+
+function storageSet(data) {
+  if (hasStorage) {
+    chrome.storage.local.set(data);
+  }
+}
+
 // App switcher buttons
 const appButtons = document.querySelectorAll('.app-btn');
 
@@ -53,9 +69,9 @@ function setActiveApp(appId) {
   // Show loading, hide iframe
   loading.classList.remove('hidden');
   iframe.style.visibility = 'hidden';
-  iframe.src = app.url;
+  if (iframe.src !== app.url) iframe.src = app.url;
 
-  chrome.storage.local.set({ [APP_KEY]: appId });
+  storageSet({ [APP_KEY]: appId });
 }
 
 appButtons.forEach(btn => {
@@ -71,11 +87,11 @@ function applyZoom(zoom) {
   iframe.style.height = (100 / scale) + '%';
   zoomLabel.textContent = currentZoom + '%';
   iframe.style.visibility = 'visible';
-  chrome.storage.local.set({ [ZOOM_KEY]: currentZoom });
+  storageSet({ [ZOOM_KEY]: currentZoom });
 }
 
 // Restore saved state
-chrome.storage.local.get([ZOOM_KEY, APP_KEY], (result) => {
+storageGet([ZOOM_KEY, APP_KEY], (result) => {
   const savedApp = result[APP_KEY];
   if (savedApp && APPS[savedApp]) {
     setActiveApp(savedApp);
