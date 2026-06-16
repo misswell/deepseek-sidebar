@@ -1,4 +1,4 @@
-// Override navigator.userAgent to mobile Safari so sites render mobile version
+// Override navigator.userAgent to mobile Safari so qianwen renders mobile version
 const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 
 Object.defineProperty(Navigator.prototype, 'userAgent', {
@@ -18,3 +18,18 @@ Object.defineProperty(Navigator.prototype, 'maxTouchPoints', {
   configurable: true,
   enumerable: true
 });
+
+// Block navigator.userAgentData (Client Hints JS API) to prevent UA mismatch detection
+try {
+  Object.defineProperty(Navigator.prototype, 'userAgentData', {
+    get: () => undefined,
+    configurable: true,
+    enumerable: true
+  });
+} catch(e) {}
+
+// Prevent frame-busting: make window.top / window.parent point to self
+try {
+  Object.defineProperty(window, 'top', { get: () => window.self });
+  Object.defineProperty(window, 'parent', { get: () => window.self });
+} catch(e) {}
