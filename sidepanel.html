@@ -79,12 +79,15 @@
 
     #webview-container {
       flex: 1;
+      min-height: 0;
       overflow: hidden;
       position: relative;
       background: #fff;
     }
 
     iframe {
+      position: absolute;
+      top: 0; left: 0;
       border: none;
       transform-origin: 0 0;
       width: 100%;
