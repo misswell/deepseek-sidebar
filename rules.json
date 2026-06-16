@@ -132,33 +132,6 @@
       ]
     },
     "condition": {
-      "resourceTypes": [
-        "sub_frame",
-        "xmlhttprequest"
-      ]
-    }
-  },
-  {
-    "id": 5,
-    "priority": 1,
-    "action": {
-      "type": "modifyHeaders",
-      "responseHeaders": [
-        {
-          "header": "X-Frame-Options",
-          "operation": "remove"
-        },
-        {
-          "header": "Content-Security-Policy",
-          "operation": "remove"
-        },
-        {
-          "header": "Content-Security-Policy-Report-Only",
-          "operation": "remove"
-        }
-      ]
-    },
-    "condition": {
       "urlFilter": "||qianwen.com",
       "resourceTypes": [
         "sub_frame",
