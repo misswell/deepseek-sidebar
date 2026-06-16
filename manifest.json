@@ -7,7 +7,8 @@
     "sidePanel",
     "activeTab",
     "storage",
-    "declarativeNetRequest", "declarativeNetRequestWithHostAccess"
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "https://chat.deepseek.com/*",
@@ -44,5 +45,22 @@
         "path": "rules.json"
       }
     ]
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.deepseek.com/*",
+        "https://chatgpt.com/*",
+        "https://gemini.google.com/*",
+        "https://www.qianwen.com/*",
+        "https://qianwen.com/*"
+      ],
+      "js": [
+        "ua-override.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ]
 }
