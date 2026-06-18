@@ -94,7 +94,7 @@
       background: #fff;
     }
 
-    iframe {
+    .webview-frame {
       position: absolute;
       top: 0; left: 0;
       border: none;
@@ -103,6 +103,8 @@
       height: 100%;
       /* visibility handled by JS */
     }
+
+    .webview-frame.hidden { display: none; }
 
     .loading {
       position: absolute;
@@ -162,7 +164,6 @@
     <div class="loading" id="loading">
       <div class="spinner"></div>
     </div>
-    <iframe id="webview" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals" allow="clipboard-read; clipboard-write; autoplay"></iframe>
   </div>
   <script src="sidepanel.js"></script>
 </body>

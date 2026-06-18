@@ -1,7 +1,7 @@
 const LOG_PREFIX = '[SIDEPANEL]';
 const log = (...args) => { try { console.log(LOG_PREFIX, ...args); } catch(e) {} };
 
-const iframe = document.getElementById('webview');
+const webviewContainer = document.getElementById('webview-container');
 const loading = document.getElementById('loading');
 const zoomIn = document.getElementById('zoom-in');
 const zoomOut = document.getElementById('zoom-out');
@@ -13,6 +13,8 @@ const APP_KEY = 'deepseek-sidebar-app';
 const ZOOM_STEP = 10;
 const ZOOM_MIN = 30;
 const ZOOM_MAX = 200;
+const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals';
+const IFRAME_ALLOW = 'clipboard-read; clipboard-write; autoplay';
 
 const APPS = {
   deepseek: { url: 'https://chat.deepseek.com/' },
@@ -26,6 +28,86 @@ const APPS = {
 let currentZoom = 100;
 let currentApp = null;
 const appButtons = document.querySelectorAll('.app-btn');
+const frames = new Map();
+const loadedApps = new Set();
+
+function applyZoomToFrame(frame) {
+  const scale = currentZoom / 100;
+  frame.style.transform = 'scale(' + scale + ')';
+  frame.style.width = (100 / scale) + '%';
+  frame.style.height = (100 / scale) + '%';
+}
+
+function hideLoadingIfStillWaiting(appId) {
+  setTimeout(() => {
+    if (currentApp === appId && !loadedApps.has(appId)) {
+      loading.classList.add('hidden');
+    }
+  }, 8000);
+}
+
+function monitorIframeUnload(frame, appId) {
+  try {
+    const win = frame.contentWindow;
+    if (win) {
+      win.addEventListener('unload', () => {
+        log('!!! IFRAME contentWindow UNLOAD !!! app:', appId, 'src:', frame.src);
+      });
+      win.addEventListener('beforeunload', () => {
+        log('!!! IFRAME contentWindow BEFOREUNLOAD !!! app:', appId, 'src:', frame.src);
+      });
+    }
+  } catch(e) {
+    // cross-origin, expected
+  }
+}
+
+function setupFrameMonitoring(frame, appId) {
+  let loadCount = 0;
+  let lastSrc = '';
+
+  frame.addEventListener('load', () => {
+    loadCount++;
+    loadedApps.add(appId);
+    const newSrc = frame.src;
+    log('iframe LOAD #' + loadCount, 'app:', appId, 'src:', newSrc, 'previous:', lastSrc);
+    if (lastSrc && newSrc !== lastSrc) {
+      log('!!! IFRAME SRC CHANGED !!! app:', appId, 'from:', lastSrc, 'to:', newSrc);
+      log('!!! Stack:', new Error().stack);
+    }
+    lastSrc = newSrc;
+    if (currentApp === appId) loading.classList.add('hidden');
+  });
+
+  frame.addEventListener('load', () => monitorIframeUnload(frame, appId));
+
+  setInterval(() => {
+    if (frame.src !== lastSrc) {
+      log('!!! IFRAME SRC CHANGED (poll) !!! app:', appId, 'from:', lastSrc, 'to:', frame.src);
+      log('!!! Stack:', new Error().stack);
+      lastSrc = frame.src;
+    }
+  }, 500);
+}
+
+function getOrCreateFrame(appId) {
+  const existingFrame = frames.get(appId);
+  if (existingFrame) return existingFrame;
+
+  const app = APPS[appId];
+  const frame = document.createElement('iframe');
+  frame.className = 'webview-frame hidden';
+  frame.dataset.app = appId;
+  frame.setAttribute('sandbox', IFRAME_SANDBOX);
+  frame.setAttribute('allow', IFRAME_ALLOW);
+  setupFrameMonitoring(frame, appId);
+  applyZoomToFrame(frame);
+  webviewContainer.appendChild(frame);
+  frames.set(appId, frame);
+  frame.src = app.url;
+  hideLoadingIfStillWaiting(appId);
+  return frame;
+}
 
 function switchApp(appId) {
   const app = APPS[appId];
@@ -33,17 +115,20 @@ function switchApp(appId) {
   log('switchApp:', appId, '->', app.url);
   currentApp = appId;
   appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === appId));
-  iframe.src = app.url;
+  getOrCreateFrame(appId);
+  frames.forEach((item, id) => item.classList.toggle('hidden', id !== appId));
+  if (loadedApps.has(appId)) loading.classList.add('hidden');
+  else {
+    loading.classList.remove('hidden');
+    hideLoadingIfStillWaiting(appId);
+  }
   applyZoom(currentZoom);
   try { chrome.storage.local.set({ [APP_KEY]: appId }); } catch (e) {}
 }
 
 function applyZoom(zoom) {
   currentZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
-  const scale = currentZoom / 100;
-  iframe.style.transform = 'scale(' + scale + ')';
-  iframe.style.width = (100 / scale) + '%';
-  iframe.style.height = (100 / scale) + '%';
+  frames.forEach(applyZoomToFrame);
   zoomLabel.textContent = currentZoom + '%';
   try { chrome.storage.local.set({ [ZOOM_KEY]: currentZoom }); } catch (e) {}
 }
@@ -54,56 +139,20 @@ appButtons.forEach(btn => {
 });
 zoomIn.addEventListener('click', () => applyZoom(currentZoom + ZOOM_STEP));
 zoomOut.addEventListener('click', () => applyZoom(currentZoom - ZOOM_STEP));
-reloadBtn.addEventListener('click', () => { iframe.src = iframe.src; });
+reloadBtn.addEventListener('click', () => {
+  const frame = frames.get(currentApp);
+  if (!frame) return;
+  loadedApps.delete(currentApp);
+  loading.classList.remove('hidden');
+  frame.src = frame.src;
+  hideLoadingIfStillWaiting(currentApp);
+});
 zoomLabel.addEventListener('dblclick', () => applyZoom(100));
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); applyZoom(currentZoom + ZOOM_STEP); }
   else if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); applyZoom(currentZoom - ZOOM_STEP); }
 });
-
-// ---- IFRAME NAVIGATION MONITORING ----
-let iframeLoadCount = 0;
-let lastIframeSrc = '';
-
-iframe.addEventListener('load', () => {
-  iframeLoadCount++;
-  const newSrc = iframe.src;
-  log('iframe LOAD #' + iframeLoadCount, 'src:', newSrc, 'previous:', lastIframeSrc);
-  if (lastIframeSrc && newSrc !== lastIframeSrc) {
-    log('!!! IFRAME SRC CHANGED !!! from:', lastIframeSrc, 'to:', newSrc);
-    log('!!! Stack:', new Error().stack);
-  }
-  lastIframeSrc = newSrc;
-  loading.classList.add('hidden');
-});
-
-// Also monitor via contentWindow unload
-const monitorIframeUnload = () => {
-  try {
-    const win = iframe.contentWindow;
-    if (win) {
-      win.addEventListener('unload', () => {
-        log('!!! IFRAME contentWindow UNLOAD !!! src:', iframe.src);
-      });
-      win.addEventListener('beforeunload', () => {
-        log('!!! IFRAME contentWindow BEFOREUNLOAD !!! src:', iframe.src);
-      });
-    }
-  } catch(e) {
-    // cross-origin, expected
-  }
-};
-iframe.addEventListener('load', monitorIframeUnload);
-
-// Poll iframe src for changes
-setInterval(() => {
-  if (iframe.src !== lastIframeSrc) {
-    log('!!! IFRAME SRC CHANGED (poll) !!! from:', lastIframeSrc, 'to:', iframe.src);
-    log('!!! Stack:', new Error().stack);
-    lastIframeSrc = iframe.src;
-  }
-}, 500);
 
 // Monitor visibility of sidepanel itself
 document.addEventListener('visibilitychange', () => {
