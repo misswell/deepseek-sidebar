@@ -1,10 +1,11 @@
 # DeepSeek Sidebar
 
-一键在 Chrome 侧边栏打开 DeepSeek，支持页面缩放并记忆缩放比例。
+一键在 Chrome 侧边栏打开 DeepSeek、千问、智谱、Kimi、ChatGPT、Gemini，支持页面缩放并记忆缩放比例。
 
 ## 功能
 
-- **一键打开** — 点击扩展图标即可在侧边栏加载 DeepSeek
+- **一键打开** — 点击扩展图标即可在侧边栏加载常用 AI 聊天站点
+- **快速切换** — 支持 DeepSeek、千问、智谱、Kimi、ChatGPT、Gemini
 - **自由缩放** — 工具栏按钮或 Ctrl/Cmd +/-/0 快捷键，30%-200% 范围调节
 - **记忆缩放** — 自动保存缩放比例，下次打开立即恢复
 - **简洁工具栏** — 深色主题，不干扰对话体验
@@ -44,11 +45,11 @@
 
 | 权限 | 用途 |
 |------|------|
-| sidePanel | 在 Chrome 侧边栏中展示 DeepSeek 页面 |
+| sidePanel | 在 Chrome 侧边栏中展示 AI 聊天站点 |
 | activeTab | 点击扩展图标时获取当前标签页以打开侧边栏 |
 | storage | 本地保存用户的缩放比例设置 |
-| declarativeNetRequest | 移除 DeepSeek 的 X-Frame-Options 响应头，使其可在侧边栏中加载 |
-| host_permissions | 访问 chat.deepseek.com 以实现上述头部修改 |
+| declarativeNetRequest | 移除 AI 聊天站点的 X-Frame-Options / Content-Security-Policy 响应头，使其可在侧边栏中加载 |
+| host_permissions | 访问 chat.deepseek.com、qianwen.com、chat.z.ai、kimi.com、chatgpt.com、gemini.google.com 以实现上述头部修改 |
 
 ## 隐私
 

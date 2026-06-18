@@ -43,7 +43,16 @@
     .app-btn:hover { background: #2a2a4a; }
     .app-btn.active { border-color: rgba(255,255,255,0.5); background: #2a2a4a; }
 
-    .app-btn img { width: 18px; height: 18px; border-radius: 2px; }
+    .app-btn img {
+      width: var(--icon-size, 20px);
+      height: var(--icon-size, 20px);
+      border-radius: 3px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .app-btn[data-app="qianwen"] img { --icon-size: 18px; }
+    .app-btn[data-app="gemini"] img { --icon-size: 21px; }
 
     .zoom-controls {
       display: flex;
@@ -51,7 +60,7 @@
       gap: 2px;
     }
 
-    #toolbar button {
+    .zoom-controls button {
       width: 26px;
       height: 26px;
       border: none;
@@ -66,8 +75,8 @@
       transition: background 0.15s, color 0.15s;
     }
 
-    #toolbar button:hover { background: #2a2a4a; color: #fff; }
-    #toolbar button:active { background: #3a3a5a; }
+    .zoom-controls button:hover { background: #2a2a4a; color: #fff; }
+    .zoom-controls button:active { background: #3a3a5a; }
 
     #zoom-label {
       font-size: 11px;
@@ -126,8 +135,14 @@
       <button class="app-btn active" data-app="deepseek" title="DeepSeek">
         <img src="icons/deepseek.png" alt="DeepSeek">
       </button>
+      <button class="app-btn" data-app="zhipu" title="智谱">
+        <img src="icons/zhipu.svg" alt="智谱">
+      </button>
       <button class="app-btn" data-app="qianwen" title="千问">
         <img src="icons/qianwen.png" alt="千问">
+      </button>
+      <button class="app-btn" data-app="kimi" title="Kimi">
+        <img src="icons/kimi.svg" alt="Kimi">
       </button>
       <button class="app-btn" data-app="chatgpt" title="ChatGPT">
         <img src="icons/chatgpt.png" alt="ChatGPT">

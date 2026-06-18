@@ -12,8 +12,11 @@
   ],
   "host_permissions": [
     "https://chat.deepseek.com/*",
+    "https://chat.z.ai/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
+    "https://www.kimi.com/*",
+    "https://kimi.com/*",
     "https://www.qianwen.com/*",
     "https://qianwen.com/*"
   ],
