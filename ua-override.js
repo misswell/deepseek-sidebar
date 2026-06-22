@@ -78,7 +78,16 @@
   } catch(e) {}
 
   // Intercept addEventListener to block problematic event types
-  const blockedEvents = ['visibilitychange', 'focus', 'blur', 'pageshow', 'pagehide'];
+  const blockedEvents = [
+    'visibilitychange',
+    'focus',
+    'blur',
+    'pageshow',
+    'pagehide',
+    'deviceorientation',
+    'deviceorientationabsolute',
+    'devicemotion'
+  ];
   const origAddEventListener = EventTarget.prototype.addEventListener;
   EventTarget.prototype.addEventListener = function(type, listener, options) {
     if (blockedEvents.includes(type)) return;

@@ -6,7 +6,7 @@
 
 - **一键打开** — 点击扩展图标即可在侧边栏加载常用 AI 聊天站点
 - **快速切换** — 支持 DeepSeek、千问、智谱、Kimi、ChatGPT、Gemini
-- **读取当前页** — 点击工具栏按钮读取当前标签页可见文本，并支持复制
+- **选择页面元素** — 像 DevTools 一样选取当前页面元素，并填充到侧栏 AI 输入框
 - **自由缩放** — 工具栏按钮或 Ctrl/Cmd +/-/0 快捷键，30%-200% 范围调节
 - **记忆缩放** — 自动保存缩放比例，下次打开立即恢复
 - **简洁工具栏** — 深色主题，不干扰对话体验
@@ -47,9 +47,9 @@
 | 权限 | 用途 |
 |------|------|
 | sidePanel | 在 Chrome 侧边栏中展示 AI 聊天站点 |
-| activeTab | 用户点击扩展后临时授权读取当前标签页内容 |
+| activeTab | 用户点击扩展后临时授权选择当前标签页中的页面元素 |
 | storage | 本地保存用户的缩放比例设置 |
-| scripting | 点击读取按钮时向当前标签页注入一次性脚本，提取页面可见文本 |
+| scripting | 点击选择按钮时向当前标签页注入一次性脚本，提取选中元素的可见文本 |
 | declarativeNetRequest | 移除 AI 聊天站点的 X-Frame-Options / Content-Security-Policy 响应头，使其可在侧边栏中加载 |
 | declarativeNetRequestWithHostAccess | 修改千问侧边栏 iframe 的 User-Agent 请求头，使其正确渲染移动版页面 |
 | host_permissions | 访问 chat.deepseek.com、qianwen.com、chat.z.ai、kimi.com、chatgpt.com、gemini.google.com 以实现上述头部修改 |

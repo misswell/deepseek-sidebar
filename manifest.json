@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DeepSeek Sidebar",
-  "version": "1.3",
+  "version": "1.4",
   "description": "Open AI chat mobile sites in Chrome sidebar with quick switch and zoom support",
   "permissions": [
     "sidePanel",
@@ -50,6 +50,23 @@
     ]
   },
   "content_scripts": [
+    {
+      "matches": [
+        "https://chat.deepseek.com/*",
+        "https://chat.z.ai/*",
+        "https://chatgpt.com/*",
+        "https://gemini.google.com/*",
+        "https://www.kimi.com/*",
+        "https://kimi.com/*",
+        "https://www.qianwen.com/*",
+        "https://qianwen.com/*"
+      ],
+      "js": [
+        "ai-input-fill.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
     {
       "matches": [
         "https://www.qianwen.com/*",

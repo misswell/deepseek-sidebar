@@ -30,7 +30,7 @@
 
   <h2>本地存储</h2>
   <p>本扩展使用 <code>chrome.storage.local</code> 在您的设备本地保存缩放比例偏好设置。该数据仅存储在您的浏览器中，不会发送到任何外部服务器。</p>
-  <p>当您点击读取当前页面内容按钮时，本扩展会在当前标签页中执行一次性脚本以读取页面可见文本，并仅显示在本地侧边栏中。</p>
+  <p>当您点击选择页面元素按钮时，本扩展会在当前标签页中执行一次性脚本以读取选中元素的可见文本。文本会显示在本地侧边栏中，并填充到当前侧边栏 AI 网站的输入框；是否发送给该第三方网站由您自行决定。</p>
 
   <h2>第三方服务</h2>
   <p>本扩展在侧边栏中加载第三方 AI 聊天网站（DeepSeek、千问、智谱、Kimi、ChatGPT、Gemini）。这些网站由各自运营商独立运营，其自身的隐私政策适用于您在该网站上的活动。本扩展不控制也不负责这些网站的数据处理行为。</p>
@@ -38,9 +38,9 @@
   <h2>权限说明</h2>
   <ul>
     <li><strong>sidePanel</strong> — 在 Chrome 侧边栏中展示 AI 聊天站点</li>
-    <li><strong>activeTab</strong> — 用户点击扩展后临时授权读取当前标签页内容</li>
+    <li><strong>activeTab</strong> — 用户点击扩展后临时授权选择当前标签页中的页面元素</li>
     <li><strong>storage</strong> — 在本地保存缩放比例设置</li>
-    <li><strong>scripting</strong> — 点击读取按钮时向当前标签页注入一次性脚本，提取页面可见文本</li>
+    <li><strong>scripting</strong> — 点击选择按钮时向当前标签页注入一次性脚本，提取选中元素的可见文本</li>
     <li><strong>declarativeNetRequest</strong> — 移除 X-Frame-Options / Content-Security-Policy 响应头，使 AI 聊天网站能在侧边栏 iframe 中正常加载</li>
     <li><strong>declarativeNetRequestWithHostAccess</strong> — 修改千问（qianwen.com）侧边栏 iframe 的请求头（User-Agent、sec-ch-ua-*），使其正确渲染移动版页面</li>
     <li><strong>host_permissions</strong> — 访问 chat.deepseek.com、qianwen.com、chat.z.ai、kimi.com、chatgpt.com、gemini.google.com 以实现上述功能</li>
