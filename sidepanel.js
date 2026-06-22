@@ -4,6 +4,14 @@ const zoomIn = document.getElementById('zoom-in');
 const zoomOut = document.getElementById('zoom-out');
 const reloadBtn = document.getElementById('refresh');
 const zoomLabel = document.getElementById('zoom-label');
+const readPageBtn = document.getElementById('read-page');
+const pageReader = document.getElementById('page-reader');
+const pageReaderTitle = document.getElementById('page-reader-title');
+const pageReaderMeta = document.getElementById('page-reader-meta');
+const pageReaderContent = document.getElementById('page-reader-content');
+const pageReaderStatus = document.getElementById('page-reader-status');
+const copyPageContentBtn = document.getElementById('copy-page-content');
+const closePageReaderBtn = document.getElementById('close-page-reader');
 
 const ZOOM_KEY = 'deepseek-sidebar-zoom';
 const APP_KEY = 'deepseek-sidebar-app';
@@ -23,6 +31,7 @@ const APPS = {
 
 let currentZoom = 100;
 let currentApp = null;
+let currentPageText = '';
 const appButtons = document.querySelectorAll('.app-btn');
 const frames = new Map();
 const loadedApps = new Set();
@@ -90,12 +99,112 @@ function applyZoom(zoom) {
   try { chrome.storage.local.set({ [ZOOM_KEY]: currentZoom }); } catch (e) {}
 }
 
+function queryActiveTab() {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+      if (!tabs || !tabs[0] || typeof tabs[0].id !== 'number') {
+        reject(new Error('未找到当前标签页'));
+        return;
+      }
+      resolve(tabs[0]);
+    });
+  });
+}
+
+function readPageText() {
+  return {
+    title: document.title || '未命名页面',
+    url: location.href,
+    text: (document.body && document.body.innerText || '').replace(/\n{3,}/g, '\n\n').trim()
+  };
+}
+
+function executePageRead(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.scripting.executeScript(
+      { target: { tabId }, func: readPageText },
+      (results) => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+        const result = results && results[0] && results[0].result;
+        if (!result) {
+          reject(new Error('无法读取当前页面'));
+          return;
+        }
+        resolve(result);
+      }
+    );
+  });
+}
+
+function showPageReader(result) {
+  currentPageText = result.text || '';
+  pageReaderTitle.textContent = result.title || '当前页面内容';
+  pageReaderMeta.textContent = result.url || '';
+  pageReaderContent.value = currentPageText;
+  pageReaderStatus.textContent = currentPageText ? currentPageText.length + ' 字符' : '未读取到文本内容';
+  pageReader.classList.remove('hidden');
+}
+
+function showPageReaderError(message) {
+  currentPageText = '';
+  pageReaderTitle.textContent = '当前页面内容';
+  pageReaderMeta.textContent = '';
+  pageReaderContent.value = '';
+  pageReaderStatus.textContent = message;
+  pageReader.classList.remove('hidden');
+}
+
+async function readCurrentPage() {
+  pageReader.classList.remove('hidden');
+  pageReaderTitle.textContent = '当前页面内容';
+  pageReaderMeta.textContent = '';
+  pageReaderContent.value = '';
+  pageReaderStatus.textContent = '读取中...';
+
+  try {
+    const tab = await queryActiveTab();
+    const result = await executePageRead(tab.id);
+    showPageReader(result);
+  } catch (e) {
+    showPageReaderError(e && e.message ? e.message : '读取失败');
+  }
+}
+
+async function copyCurrentPageText() {
+  if (!currentPageText) {
+    pageReaderStatus.textContent = '没有可复制的页面内容';
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(currentPageText);
+    pageReaderStatus.textContent = '已复制';
+  } catch (e) {
+    pageReaderContent.focus();
+    pageReaderContent.select();
+    document.execCommand('copy');
+    pageReaderStatus.textContent = '已复制';
+  }
+}
+
 // Bind all event listeners first (before any potentially failing async/storage calls)
 appButtons.forEach(btn => {
   btn.addEventListener('click', () => switchApp(btn.dataset.app));
 });
 zoomIn.addEventListener('click', () => applyZoom(currentZoom + ZOOM_STEP));
 zoomOut.addEventListener('click', () => applyZoom(currentZoom - ZOOM_STEP));
+readPageBtn.addEventListener('click', readCurrentPage);
+copyPageContentBtn.addEventListener('click', copyCurrentPageText);
+closePageReaderBtn.addEventListener('click', () => pageReader.classList.add('hidden'));
 reloadBtn.addEventListener('click', () => {
   const frame = frames.get(currentApp);
   if (!frame) return;
