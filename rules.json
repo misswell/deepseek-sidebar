@@ -183,7 +183,6 @@
     "condition": {
       "urlFilter": "||qianwen.com",
       "resourceTypes": [
-        "main_frame",
         "sub_frame",
         "xmlhttprequest"
       ]
@@ -227,7 +226,6 @@
     "condition": {
       "urlFilter": "||qianwen.com",
       "resourceTypes": [
-        "main_frame",
         "sub_frame",
         "xmlhttprequest"
       ]

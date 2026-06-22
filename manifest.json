@@ -5,7 +5,6 @@
   "description": "Open AI chat mobile sites in Chrome sidebar with quick switch and zoom support",
   "permissions": [
     "sidePanel",
-    "activeTab",
     "storage",
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess"

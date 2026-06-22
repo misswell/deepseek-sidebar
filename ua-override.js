@@ -11,13 +11,6 @@
 
   if (!isMainFrame) return;
 
-  const LOG_PREFIX = '[UA-OVERRIDE]';
-  const log = (...args) => {
-    try { console.log(LOG_PREFIX, ...args); } catch(e) {}
-  };
-
-  log('injected at', document.readyState, 'URL:', location.href);
-
   // ---- Mobile UA override ----
   const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 
@@ -51,8 +44,6 @@
     });
   } catch(e) {}
 
-  log('UA overrides installed');
-
   // ---- Hide the fact that we're in an iframe ----
   // Shadow window.top and window.parent to point to self
   try {
@@ -62,10 +53,7 @@
     Object.defineProperty(window, 'parent', {
       get: () => window.self, configurable: true, enumerable: true
     });
-    log('window.top/parent shadowed');
-  } catch(e) {
-    log('window.top/parent shadow FAILED:', e.message);
-  }
+  } catch(e) {}
 
   // Block frameElement
   try {
@@ -96,20 +84,4 @@
     if (blockedEvents.includes(type)) return;
     return origAddEventListener.call(this, type, listener, options);
   };
-
-  // ---- Monitor for navigation ----
-  let lastHref = location.href;
-  setInterval(() => {
-    if (location.href !== lastHref) {
-      log('!!! NAVIGATION:', lastHref, '->', location.href);
-      log('!!! Stack:', new Error().stack);
-      lastHref = location.href;
-    }
-  }, 200);
-
-  window.addEventListener('beforeunload', () => {
-    log('!!! beforeunload fired !!!');
-  });
-
-  log('all monitors installed, waiting...');
 })();

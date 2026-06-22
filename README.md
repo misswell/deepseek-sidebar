@@ -46,9 +46,9 @@
 | 权限 | 用途 |
 |------|------|
 | sidePanel | 在 Chrome 侧边栏中展示 AI 聊天站点 |
-| activeTab | 点击扩展图标时获取当前标签页以打开侧边栏 |
 | storage | 本地保存用户的缩放比例设置 |
 | declarativeNetRequest | 移除 AI 聊天站点的 X-Frame-Options / Content-Security-Policy 响应头，使其可在侧边栏中加载 |
+| declarativeNetRequestWithHostAccess | 修改千问侧边栏 iframe 的 User-Agent 请求头，使其正确渲染移动版页面 |
 | host_permissions | 访问 chat.deepseek.com、qianwen.com、chat.z.ai、kimi.com、chatgpt.com、gemini.google.com 以实现上述头部修改 |
 
 ## 隐私
