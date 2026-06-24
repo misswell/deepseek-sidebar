@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DeepSeek Sidebar",
-  "version": "1.4",
+  "version": "1.5",
   "description": "Open AI chat mobile sites in Chrome sidebar with quick switch and zoom support",
   "permissions": [
     "sidePanel",
@@ -20,6 +20,9 @@
     "https://kimi.com/*",
     "https://www.qianwen.com/*",
     "https://qianwen.com/*"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
   ],
   "action": {
     "default_title": "Open AI Sidebar",

@@ -42,6 +42,9 @@ let currentApp = null;
 let currentPageText = '';
 let lastFillRequestId = 0;
 let pickingTabId = null;
+let pickCancelled = false;
+let pickWaitResolver = null;
+let pickPendingNavigation = false;
 const appButtons = document.querySelectorAll('.app-btn');
 const frames = new Map();
 const loadedApps = new Set();
@@ -125,6 +128,51 @@ function queryActiveTab() {
       resolve(tabs[0]);
     });
   });
+}
+
+function hasHostPermissionFor(url) {
+  return new Promise((resolve) => {
+    if (!url) return resolve(false);
+    try {
+      chrome.permissions.contains({ origins: [url] }, (granted) => {
+        void chrome.runtime.lastError;
+        resolve(!!granted);
+      });
+    } catch (e) {
+      resolve(false);
+    }
+  });
+}
+
+function requestAllUrlsPermission() {
+  return new Promise((resolve) => {
+    try {
+      chrome.permissions.request({ origins: ['<all_urls>'] }, (granted) => {
+        void chrome.runtime.lastError;
+        resolve(!!granted);
+      });
+    } catch (e) {
+      resolve(false);
+    }
+  });
+}
+
+async function ensurePickPermission(tab) {
+  if (!tab || !tab.url) return true;
+  if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') ||
+      tab.url.startsWith('edge://') || tab.url.startsWith('about:') ||
+      tab.url.startsWith('chrome.google.com/webstore') ||
+      tab.url.startsWith('https://chrome.google.com/webstore')) {
+    return false;
+  }
+
+  const origin = (() => {
+    try { return new URL(tab.url).origin + '/*'; } catch { return null; }
+  })();
+  if (!origin) return true;
+
+  if (await hasHostPermissionFor(origin)) return true;
+  return await requestAllUrlsPermission();
 }
 
 function pickPageElement() {
@@ -338,10 +386,39 @@ function executeElementPick(tabId) {
 
 function executeElementPickCancel(tabId) {
   return new Promise((resolve) => {
-    chrome.scripting.executeScript(
-      { target: { tabId }, func: cancelPageElementPick },
-      () => resolve()
-    );
+    try {
+      chrome.scripting.executeScript(
+        { target: { tabId }, func: cancelPageElementPick },
+        () => {
+          // ignore lastError; injection may fail on chrome:// or navigation
+          void chrome.runtime.lastError;
+          resolve();
+        }
+      );
+    } catch (e) {
+      resolve();
+    }
+  });
+}
+
+function waitForTabComplete(tabId) {
+  return new Promise((resolve) => {
+    if (pickPendingNavigation) {
+      pickPendingNavigation = false;
+      resolve('complete');
+      return;
+    }
+    pickWaitResolver = (reason) => {
+      pickWaitResolver = null;
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve(reason);
+    };
+    function onUpdated(updatedId, changeInfo) {
+      if (updatedId !== tabId) return;
+      if (changeInfo.status !== 'loading' && changeInfo.status !== 'complete') return;
+      pickWaitResolver && pickWaitResolver('complete');
+    }
+    chrome.tabs.onUpdated.addListener(onUpdated);
   });
 }
 
@@ -408,8 +485,12 @@ function showPageReaderError(message) {
 
 async function pickCurrentPageElement() {
   if (pickingTabId !== null) {
+    if (pickCancelled) {
+      return;
+    }
+    pickCancelled = true;
     await executeElementPickCancel(pickingTabId);
-    pickingTabId = null;
+    if (pickWaitResolver) pickWaitResolver('cancelled');
     pageReaderStatus.textContent = '已取消选择';
     return;
   }
@@ -420,20 +501,121 @@ async function pickCurrentPageElement() {
   pageReaderContent.value = '';
   pageReaderStatus.textContent = '请在当前页面移动鼠标选择元素，左键确认，右键取消';
 
+  let tab;
   try {
-    const tab = await queryActiveTab();
-    pickingTabId = tab.id;
-    const result = await executeElementPick(tab.id);
-    pickingTabId = null;
-    if (result.cancelled) {
-      pageReaderStatus.textContent = '已取消选择';
-      return;
-    }
-    showSelectedElement(result);
-    fillCurrentAppInput(currentPageText);
+    tab = await queryActiveTab();
   } catch (e) {
-    pickingTabId = null;
     showPageReaderError(e && e.message ? e.message : '选择失败');
+    return;
+  }
+
+  const granted = await ensurePickPermission(tab);
+  if (!granted) {
+    showPageReaderError('需要在弹出的权限提示中允许访问网站，否则跳转后无法选择元素。');
+    return;
+  }
+
+  pickingTabId = tab.id;
+  pickCancelled = false;
+  pickPendingNavigation = false;
+  pickWaitResolver = null;
+
+  const onNavigation = (updatedTabId, changeInfo) => {
+    if (updatedTabId !== pickingTabId) return;
+    if (
+      changeInfo.status !== 'loading' &&
+      changeInfo.status !== 'complete' &&
+      !changeInfo.url
+    ) return;
+    pickPendingNavigation = true;
+    if (pickWaitResolver) pickWaitResolver('navigation');
+  };
+  chrome.tabs.onUpdated.addListener(onNavigation);
+
+  try {
+    while (!pickCancelled) {
+      let result;
+      const pickPromise = executeElementPick(pickingTabId);
+      result = await Promise.race([
+        pickPromise.then((value) => ({ kind: 'result', value })).catch((error) => ({ kind: 'error', error })),
+        new Promise((resolve) => {
+          if (pickPendingNavigation) {
+            pickPendingNavigation = false;
+            resolve({ kind: 'navigation' });
+            return;
+          }
+          pickWaitResolver = (reason) => {
+            pickWaitResolver = null;
+            resolve({ kind: reason === 'cancelled' ? 'cancelled' : 'navigation' });
+          };
+        })
+      ]);
+
+      if (result.kind === 'cancelled' || pickCancelled) {
+        pageReaderStatus.textContent = '已取消选择';
+        await executeElementPickCancel(pickingTabId);
+        break;
+      }
+
+      if (result.kind === 'navigation') {
+        pageReaderStatus.textContent = '页面已跳转，等待加载后继续选择...';
+        await waitForTabComplete(pickingTabId);
+        if (pickCancelled) {
+          pageReaderStatus.textContent = '已取消选择';
+          break;
+        }
+        try {
+          const refreshedTab = await queryActiveTab();
+          if (!(await ensurePickPermission(refreshedTab))) {
+            showPageReaderError('跳转到新页面，权限不足，请重新点击选择按钮并授权');
+            break;
+          }
+        } catch (e) {
+          showPageReaderError(e && e.message ? e.message : '权限检查失败');
+          break;
+        }
+        pageReaderStatus.textContent = '请在当前页面移动鼠标选择元素，左键确认，右键取消';
+        continue;
+      }
+
+      if (result.kind === 'error') {
+        if (pickCancelled) break;
+        pageReaderStatus.textContent = '页面已跳转，等待加载后继续选择...';
+        await waitForTabComplete(pickingTabId);
+        if (pickCancelled) {
+          pageReaderStatus.textContent = '已取消选择';
+          break;
+        }
+        try {
+          const refreshedTab = await queryActiveTab();
+          if (!(await ensurePickPermission(refreshedTab))) {
+            showPageReaderError('跳转到新页面，权限不足，请重新点击选择按钮并授权');
+            break;
+          }
+        } catch (e) {
+          showPageReaderError(e && e.message ? e.message : '权限检查失败');
+          break;
+        }
+        pageReaderStatus.textContent = '请在当前页面移动鼠标选择元素，左键确认，右键取消';
+        continue;
+      }
+
+      const value = result.value;
+      if (!value || value.cancelled) {
+        pageReaderStatus.textContent = '已取消选择';
+        break;
+      }
+
+      showSelectedElement(value);
+      fillCurrentAppInput(currentPageText);
+      break;
+    }
+  } finally {
+    chrome.tabs.onUpdated.removeListener(onNavigation);
+    pickingTabId = null;
+    pickCancelled = false;
+    pickPendingNavigation = false;
+    pickWaitResolver = null;
   }
 }
 
