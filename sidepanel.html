@@ -58,6 +58,7 @@
 
     .app-btn[data-app="qianwen"] img { --icon-size: 18px; }
     .app-btn[data-app="gemini"] img { --icon-size: 21px; }
+    .app-btn[data-app="youdao"] img { --icon-size: 20px; }
 
     .zoom-controls {
       display: flex;
@@ -293,32 +294,14 @@
 </head>
 <body>
   <div id="toolbar">
-    <div class="app-switcher">
-      <button class="app-btn active" data-app="deepseek" title="DeepSeek">
-        <img src="icons/deepseek.png" alt="DeepSeek">
-      </button>
-      <button class="app-btn" data-app="zhipu" title="智谱">
-        <img src="icons/zhipu.svg" alt="智谱">
-      </button>
-      <button class="app-btn" data-app="qianwen" title="千问">
-        <img src="icons/qianwen.png" alt="千问">
-      </button>
-      <button class="app-btn" data-app="kimi" title="Kimi">
-        <img src="icons/kimi.svg" alt="Kimi">
-      </button>
-      <button class="app-btn" data-app="chatgpt" title="ChatGPT">
-        <img src="icons/chatgpt.png" alt="ChatGPT">
-      </button>
-      <button class="app-btn" data-app="gemini" title="Gemini">
-        <img src="icons/gemini.png" alt="Gemini">
-      </button>
-    </div>
+    <div class="app-switcher" id="appSwitcher"></div>
     <div class="zoom-controls">
       <button id="zoom-out" title="缩小 (Ctrl/Cmd + -)">−</button>
       <span id="zoom-label">100%</span>
       <button id="zoom-in" title="放大 (Ctrl/Cmd + +)">+</button>
       <button id="pick-element" title="选择页面元素">⌖</button>
       <button id="refresh" title="刷新页面 (F5)">↻</button>
+      <button id="config-btn" title="设置">⚙</button>
     </div>
   </div>
   <div id="webview-container">

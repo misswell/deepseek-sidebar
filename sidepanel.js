@@ -16,6 +16,8 @@ const closePageReaderBtn = document.getElementById('close-page-reader');
 
 const ZOOM_KEY = 'deepseek-sidebar-zoom';
 const APP_KEY = 'deepseek-sidebar-app';
+const VISIBILITY_KEY = 'deepseek-sidebar-visibility';
+const ORDER_KEY = 'deepseek-sidebar-order';
 const ZOOM_STEP = 10;
 const ZOOM_MIN = 30;
 const ZOOM_MAX = 200;
@@ -34,8 +36,20 @@ const APPS = {
   qianwen: { url: 'https://www.qianwen.com/' },
   kimi: { url: 'https://www.kimi.com/' },
   chatgpt: { url: 'https://chatgpt.com/' },
-  gemini: { url: 'https://gemini.google.com/app' }
+  gemini: { url: 'https://gemini.google.com/app' },
+  youdao: { url: 'https://dict.youdao.com/m/' }
 };
+
+// App metadata for dynamic button rendering — order matters
+const APP_META = [
+  { id: 'deepseek', name: 'DeepSeek', icon: 'icons/icon-deep.png' },
+  { id: 'zhipu', name: '智谱', icon: 'icons/zhipu.svg' },
+  { id: 'qianwen', name: '千问', icon: 'icons/qianwen.png' },
+  { id: 'kimi', name: 'Kimi', icon: 'icons/kimi.svg' },
+  { id: 'chatgpt', name: 'ChatGPT', icon: 'icons/chatgpt.png' },
+  { id: 'gemini', name: 'Gemini', icon: 'icons/gemini.png' },
+  { id: 'youdao', name: '有道词典', icon: 'icons/youdao.svg' }
+];
 
 let currentZoom = 100;
 let currentApp = null;
@@ -45,9 +59,97 @@ let pickingTabId = null;
 let pickCancelled = false;
 let pickWaitResolver = null;
 let pickPendingNavigation = false;
-const appButtons = document.querySelectorAll('.app-btn');
+const appSwitcher = document.getElementById('appSwitcher');
+const configBtn = document.getElementById('config-btn');
+let appButtons = [];  // populated dynamically by renderAppButtons()
+let appVisibility = {};  // { appId: true/false }
+let appOrder = [];  // ordered array of app ids
 const frames = new Map();
 const loadedApps = new Set();
+
+function renderAppButtons() {
+  appSwitcher.innerHTML = '';
+  appButtons = [];
+  // Build ordered list: use appOrder, append any new apps not in saved order
+  let orderedMeta = [];
+  if (appOrder.length > 0) {
+    appOrder.forEach(id => {
+      const meta = APP_META.find(a => a.id === id);
+      if (meta) orderedMeta.push(meta);
+    });
+    APP_META.forEach(app => {
+      if (!appOrder.includes(app.id)) orderedMeta.push(app);
+    });
+  } else {
+    orderedMeta = [...APP_META];
+  }
+  orderedMeta.forEach(app => {
+    if (appVisibility[app.id] === false) return;  // hidden apps
+    const btn = document.createElement('button');
+    btn.className = 'app-btn';
+    btn.dataset.app = app.id;
+    btn.title = app.name;
+    const img = document.createElement('img');
+    img.src = app.icon;
+    img.alt = app.name;
+    btn.appendChild(img);
+    btn.addEventListener('click', () => switchApp(app.id));
+    appSwitcher.appendChild(btn);
+    appButtons.push(btn);
+  });
+  // Re-apply active state
+  if (currentApp) {
+    appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === currentApp));
+  }
+}
+
+function loadAppVisibility() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get([VISIBILITY_KEY, ORDER_KEY], (result) => {
+        const saved = result[VISIBILITY_KEY];
+        if (saved && typeof saved === 'object') {
+          appVisibility = saved;
+        } else {
+          APP_META.forEach(app => { appVisibility[app.id] = true; });
+        }
+        const savedOrder = result[ORDER_KEY];
+        if (Array.isArray(savedOrder)) {
+          appOrder = savedOrder.filter(id => APP_META.some(a => a.id === id));
+          APP_META.forEach(app => {
+            if (!appOrder.includes(app.id)) appOrder.push(app.id);
+          });
+        } else {
+          appOrder = APP_META.map(a => a.id);
+        }
+        resolve();
+      });
+    } catch (e) {
+      APP_META.forEach(app => { appVisibility[app.id] = true; });
+      appOrder = APP_META.map(a => a.id);
+      resolve();
+    }
+  });
+}
+
+// Listen for visibility/order changes from config page
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes[VISIBILITY_KEY]) {
+    appVisibility = changes[VISIBILITY_KEY].newValue || {};
+    renderAppButtons();
+  }
+  if (changes[ORDER_KEY]) {
+    const savedOrder = changes[ORDER_KEY].newValue;
+    if (Array.isArray(savedOrder)) {
+      appOrder = savedOrder.filter(id => APP_META.some(a => a.id === id));
+      APP_META.forEach(app => {
+        if (!appOrder.includes(app.id)) appOrder.push(app.id);
+      });
+    }
+    renderAppButtons();
+  }
+});
 
 function applyZoomToFrame(frame) {
   const scale = currentZoom / 100;
@@ -637,9 +739,6 @@ async function copyCurrentPageText() {
 }
 
 // Bind all event listeners first (before any potentially failing async/storage calls)
-appButtons.forEach(btn => {
-  btn.addEventListener('click', () => switchApp(btn.dataset.app));
-});
 zoomIn.addEventListener('click', () => applyZoom(currentZoom + ZOOM_STEP));
 zoomOut.addEventListener('click', () => applyZoom(currentZoom - ZOOM_STEP));
 pickElementBtn.addEventListener('click', pickCurrentPageElement);
@@ -648,6 +747,13 @@ copyPageContentBtn.addEventListener('click', copyCurrentPageText);
 closePageReaderBtn.addEventListener('click', () => {
   pageReader.classList.add('hidden');
   setPageReaderExpanded(false);
+});
+configBtn.addEventListener('click', () => {
+  if (chrome.runtime.openOptionsPage) {
+    chrome.runtime.openOptionsPage();
+  } else {
+    window.open(chrome.runtime.getURL('config.html'));
+  }
 });
 reloadBtn.addEventListener('click', () => {
   const frame = frames.get(currentApp);
@@ -680,12 +786,26 @@ window.addEventListener('message', (event) => {
 setTimeout(() => loading.classList.add('hidden'), 8000);
 
 // Restore saved state (last, in case storage API fails)
-try {
-  chrome.storage.local.get([ZOOM_KEY, APP_KEY], (result) => {
-    switchApp(result[APP_KEY] || 'deepseek');
-    applyZoom(result[ZOOM_KEY] || 100);
-  });
-} catch (e) {
-  switchApp('deepseek');
-  applyZoom(100);
-}
+(async () => {
+  await loadAppVisibility();
+  renderAppButtons();
+  let savedApp = 'deepseek';
+  let savedZoom = 100;
+  try {
+    const result = await new Promise((resolve, reject) => {
+      chrome.storage.local.get([ZOOM_KEY, APP_KEY], resolve);
+    });
+    savedApp = result[APP_KEY] || 'deepseek';
+    savedZoom = result[ZOOM_KEY] || 100;
+  } catch (e) {
+    // use defaults
+  }
+  // If saved app is hidden, fall back to first visible app
+  if (appVisibility[savedApp] === false) {
+    const orderedIds = appOrder.length > 0 ? appOrder : APP_META.map(a => a.id);
+    const firstVisibleId = orderedIds.find(id => appVisibility[id] !== false);
+    savedApp = firstVisibleId || 'deepseek';
+  }
+  switchApp(savedApp);
+  applyZoom(savedZoom);
+})();
