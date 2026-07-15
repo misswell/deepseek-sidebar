@@ -42,7 +42,7 @@ const APPS = {
 
 // App metadata for dynamic button rendering — order matters
 const APP_META = [
-  { id: 'deepseek', name: 'DeepSeek', icon: 'icons/icon-deep.png' },
+  { id: 'deepseek', name: 'DeepSeek', icon: 'icons/deepseek.png' },
   { id: 'zhipu', name: '智谱', icon: 'icons/zhipu.svg' },
   { id: 'qianwen', name: '千问', icon: 'icons/qianwen.png' },
   { id: 'kimi', name: 'Kimi', icon: 'icons/kimi.svg' },

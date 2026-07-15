@@ -1,6 +1,6 @@
 // All available apps — must match APP_META in sidepanel.js
 const APPS = [
-  { id: 'deepseek', name: 'DeepSeek', url: 'https://chat.deepseek.com/', icon: 'icons/icon-deep.png' },
+  { id: 'deepseek', name: 'DeepSeek', url: 'https://chat.deepseek.com/', icon: 'icons/deepseek.png' },
   { id: 'zhipu', name: '智谱', url: 'https://chat.z.ai/', icon: 'icons/zhipu.svg' },
   { id: 'qianwen', name: '千问', url: 'https://www.qianwen.com/', icon: 'icons/qianwen.png' },
   { id: 'kimi', name: 'Kimi', url: 'https://www.kimi.com/', icon: 'icons/kimi.svg' },
