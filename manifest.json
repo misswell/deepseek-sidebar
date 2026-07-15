@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DeepSeek Sidebar",
-  "version": "1.8",
+  "version": "1.9",
   "description": "Open AI chat mobile sites in Chrome sidebar with quick switch and zoom support",
   "permissions": [
     "sidePanel",
