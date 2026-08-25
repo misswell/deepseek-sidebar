@@ -113,6 +113,291 @@
 
     .webview-frame.hidden { display: none; }
 
+    .harness-panel {
+      position: absolute;
+      inset: 0;
+      overflow-y: auto;
+      padding: 16px 14px 24px;
+      background: #0b1118;
+      color: #e5edf5;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    .harness-panel.hidden { display: none; }
+
+    .harness-hero {
+      position: relative;
+      overflow: hidden;
+      padding: 16px;
+      border: 1px solid #1f3b45;
+      border-radius: 14px;
+      background:
+        radial-gradient(circle at 92% 8%, rgba(61, 227, 177, 0.18), transparent 35%),
+        linear-gradient(145deg, #10232b 0%, #0c151d 68%);
+      box-shadow: 0 16px 30px rgba(0, 0, 0, 0.18);
+    }
+
+    .harness-hero::after {
+      content: '';
+      position: absolute;
+      right: -32px;
+      bottom: -48px;
+      width: 150px;
+      height: 150px;
+      border: 1px solid rgba(110, 231, 183, 0.16);
+      border-radius: 50%;
+      box-shadow: 0 0 0 14px rgba(110, 231, 183, 0.04), 0 0 0 28px rgba(110, 231, 183, 0.025);
+      pointer-events: none;
+    }
+
+    .harness-kicker {
+      color: #6ee7b7;
+      font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .harness-hero h1 {
+      max-width: 260px;
+      margin-top: 8px;
+      color: #f5fbff;
+      font-size: 22px;
+      line-height: 1.1;
+      letter-spacing: -0.04em;
+    }
+
+    .harness-hero p {
+      max-width: 320px;
+      margin-top: 8px;
+      color: #9eb2be;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .harness-connection {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 14px;
+      color: #a9c4cc;
+      font-size: 11px;
+    }
+
+    .harness-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .harness-state-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #f59e0b;
+      box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+    }
+
+    .harness-state.connected .harness-state-dot {
+      background: #6ee7b7;
+      box-shadow: 0 0 0 4px rgba(110, 231, 183, 0.12);
+    }
+
+    .harness-state.error .harness-state-dot {
+      background: #fb7185;
+      box-shadow: 0 0 0 4px rgba(251, 113, 133, 0.12);
+    }
+
+    .harness-endpoint-row {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .harness-endpoint {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      color: #b9d6df;
+      font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .harness-panel button {
+      border: 1px solid #29434e;
+      border-radius: 7px;
+      padding: 7px 10px;
+      background: #142932;
+      color: #d7edf1;
+      cursor: pointer;
+      font: 11px -apple-system, BlinkMacSystemFont, sans-serif;
+      transition: border-color 0.15s, background 0.15s, transform 0.15s;
+    }
+
+    .harness-panel button:hover { border-color: #6ee7b7; background: #1a3740; }
+    .harness-panel button:active { transform: translateY(1px); }
+    .harness-panel button:disabled { cursor: wait; opacity: 0.55; }
+
+    .harness-section {
+      margin-top: 16px;
+    }
+
+    .harness-section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
+      color: #b2c4cc;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    .harness-section-heading button {
+      border: none;
+      padding: 2px 0;
+      background: transparent;
+      color: #6ee7b7;
+      font-size: 11px;
+    }
+
+    .harness-section-heading button:hover { background: transparent; color: #a7f3d0; }
+
+    .harness-page-card {
+      padding: 11px 12px;
+      border: 1px solid #20313b;
+      border-radius: 9px;
+      background: #101a22;
+    }
+
+    .harness-page-title {
+      overflow: hidden;
+      color: #ecf7fa;
+      font-size: 13px;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .harness-page-url,
+    .harness-snapshot-meta {
+      overflow: hidden;
+      margin-top: 4px;
+      color: #718894;
+      font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .harness-task-label {
+      display: block;
+      margin-top: 16px;
+      color: #b2c4cc;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    #harness-task {
+      display: block;
+      width: 100%;
+      min-height: 88px;
+      margin-top: 7px;
+      resize: vertical;
+      border: 1px solid #29404a;
+      border-radius: 9px;
+      padding: 10px 11px;
+      outline: none;
+      background: #0e171e;
+      color: #e5edf5;
+      font: 12px/1.55 -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    #harness-task::placeholder { color: #5d737e; }
+    #harness-task:focus { border-color: #6ee7b7; box-shadow: 0 0 0 3px rgba(110, 231, 183, 0.1); }
+
+    .harness-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .harness-auto-run {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      color: #8ea7b1;
+      font-size: 10px;
+      line-height: 1.35;
+    }
+
+    .harness-auto-run input { accent-color: #6ee7b7; }
+
+    #harness-run {
+      flex-shrink: 0;
+      border-color: #6ee7b7;
+      background: #6ee7b7;
+      color: #092019;
+      font-weight: 700;
+    }
+
+    #harness-run:hover { border-color: #a7f3d0; background: #a7f3d0; }
+
+    .harness-status {
+      min-height: 17px;
+      margin-top: 8px;
+      color: #8ea7b1;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .harness-status.error { color: #fda4af; }
+    .harness-status.success { color: #86efac; }
+
+    .harness-log {
+      margin-top: 16px;
+      border-top: 1px solid #1d2c34;
+      padding-top: 12px;
+    }
+
+    .harness-log-title {
+      color: #718894;
+      font: 10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .harness-log-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .harness-log-item {
+      padding: 8px 9px;
+      border-left: 2px solid #31515a;
+      background: #101a22;
+      color: #a8bbc2;
+      font-size: 11px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .harness-log-item.action { border-left-color: #6ee7b7; }
+    .harness-log-item.error { border-left-color: #fb7185; color: #fda4af; }
+    .harness-log-item.result { border-left-color: #60a5fa; }
+
     .loading {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -305,6 +590,55 @@
     </div>
   </div>
   <div id="webview-container">
+    <div class="harness-panel hidden" id="harness-panel">
+      <div class="harness-hero">
+        <div class="harness-connection">
+          <div class="harness-state" id="harness-state">
+            <span class="harness-state-dot"></span>
+            <span id="harness-state-label">尚未连接</span>
+          </div>
+          <span class="harness-kicker">local web operator</span>
+        </div>
+        <h1>把当前页面交给 DeepSeek</h1>
+        <p>读取当前标签页的可见内容与交互元素，再由本地 Harness 规划并执行浏览器动作。</p>
+        <div class="harness-endpoint-row">
+          <code class="harness-endpoint" id="harness-endpoint">http://127.0.0.1:3080</code>
+          <button id="harness-open" type="button">打开 Harness ↗</button>
+        </div>
+      </div>
+
+      <section class="harness-section">
+        <div class="harness-section-heading">
+          <span>当前标签页</span>
+          <button id="harness-refresh-snapshot" type="button">刷新快照</button>
+        </div>
+        <div class="harness-page-card">
+          <div class="harness-page-title" id="harness-page-title">等待读取当前页面</div>
+          <div class="harness-page-url" id="harness-page-url"></div>
+          <div class="harness-snapshot-meta" id="harness-snapshot-meta"></div>
+        </div>
+      </section>
+
+      <label class="harness-task-label" for="harness-task">
+        网页任务
+        <textarea id="harness-task" placeholder="例如：在当前页面搜索“DeepSeek Harness”，打开第一条结果"></textarea>
+      </label>
+      <div class="harness-controls">
+        <label class="harness-auto-run" for="harness-auto-run">
+          <input id="harness-auto-run" type="checkbox" checked>
+          <span>自动执行模型动作</span>
+        </label>
+        <button id="harness-run" type="button">运行任务</button>
+      </div>
+      <div class="harness-status" id="harness-status"></div>
+
+      <div class="harness-log">
+        <div class="harness-log-title">execution log</div>
+        <div class="harness-log-list" id="harness-log-list">
+          <div class="harness-log-item">输入任务后，扩展会先读取当前页面，再把结构化动作交给 Chrome 执行。</div>
+        </div>
+      </div>
+    </div>
     <div class="page-reader hidden" id="page-reader">
       <div class="page-reader-header">
         <div class="page-reader-title" id="page-reader-title">当前页面内容</div>
@@ -322,6 +656,9 @@
       <div class="spinner"></div>
     </div>
   </div>
+  <script src="harness-protocol.js"></script>
+  <script src="harness-extension-transport.js"></script>
+  <script src="harness-client.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

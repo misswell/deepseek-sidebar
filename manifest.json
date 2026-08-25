@@ -1,17 +1,20 @@
 {
   "manifest_version": 3,
   "name": "DeepSeek Sidebar",
-  "version": "1.9",
-  "description": "Open AI chat mobile sites in Chrome sidebar with quick switch and zoom support",
+  "version": "1.9.1",
+  "description": "Open AI chat sites in Chrome sidebar and let a local DeepSeek Harness operate the current page",
   "permissions": [
     "sidePanel",
     "activeTab",
+    "tabs",
     "storage",
     "scripting",
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
     "https://chat.deepseek.com/*",
     "https://chat.z.ai/*",
     "https://chatgpt.com/*",

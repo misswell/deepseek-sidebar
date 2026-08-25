@@ -123,17 +123,135 @@
       margin-top: 10px;
       min-height: 16px;
     }
+
+    .harness-settings {
+      margin: 0 0 22px;
+      border: 1px solid #28524d;
+      border-radius: 12px;
+      padding: 16px;
+      background:
+        radial-gradient(circle at 96% 0, rgba(110, 231, 183, 0.15), transparent 32%),
+        #14242b;
+      box-shadow: 0 14px 28px rgba(4, 8, 18, 0.22);
+    }
+
+    .harness-heading {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .harness-signal {
+      width: 10px;
+      height: 10px;
+      flex-shrink: 0;
+      margin-top: 4px;
+      border-radius: 50%;
+      background: #6ee7b7;
+      box-shadow: 0 0 0 5px rgba(110, 231, 183, 0.12);
+    }
+
+    .harness-heading h2 {
+      color: #f1fffb;
+      font-size: 15px;
+      letter-spacing: -0.02em;
+    }
+
+    .harness-heading p {
+      margin-top: 4px;
+      color: #9eb7b7;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .harness-label {
+      display: block;
+      margin-top: 15px;
+      color: #c0d7d1;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .harness-endpoint-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 7px;
+    }
+
+    #harnessUrl {
+      min-width: 0;
+      flex: 1;
+      border: 1px solid #37645d;
+      border-radius: 7px;
+      padding: 9px 10px;
+      outline: none;
+      background: #0f1b21;
+      color: #e6fff7;
+      font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    #harnessUrl:focus {
+      border-color: #6ee7b7;
+      box-shadow: 0 0 0 3px rgba(110, 231, 183, 0.1);
+    }
+
+    .btn-test {
+      flex-shrink: 0;
+      padding: 8px 11px;
+      background: #6ee7b7;
+      color: #092019;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .btn-test:hover { background: #a7f3d0; }
+
+    .harness-hint {
+      margin-top: 8px;
+      color: #789590;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .harness-status {
+      min-height: 17px;
+      margin-top: 9px;
+      color: #86efac;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .harness-status.error { color: #fda4af; }
   </style>
 </head>
 <body>
   <h1>顶部栏显示设置</h1>
   <p class="subtitle">勾选要在侧边栏顶部显示的网站</p>
+  <section class="harness-settings">
+    <div class="harness-heading">
+      <span class="harness-signal"></span>
+      <div>
+        <h2>DeepSeek Harness 网页代理</h2>
+        <p>连接本机或局域网里的 Harness，让它读取并操作当前 Chrome 标签页。</p>
+      </div>
+    </div>
+    <label class="harness-label" for="harnessUrl">服务地址</label>
+    <div class="harness-endpoint-row">
+      <input id="harnessUrl" type="url" inputmode="url" spellcheck="false" placeholder="http://127.0.0.1:3080/">
+      <button class="btn-test" id="testHarnessBtn" type="button">测试连接</button>
+    </div>
+    <p class="harness-hint">默认地址为 http://127.0.0.1:3080/。自定义远程地址时，Chrome 会单独请求该站点的访问权限。</p>
+    <div class="harness-status" id="harnessStatus"></div>
+  </section>
   <div class="app-list" id="appList"></div>
   <div class="save-bar">
     <button class="btn-save" id="saveBtn">保存</button>
     <button class="btn-reset" id="resetBtn">恢复默认</button>
   </div>
   <div class="status" id="status"></div>
+  <script src="harness-protocol.js"></script>
+  <script src="harness-extension-transport.js"></script>
+  <script src="harness-client.js"></script>
   <script src="config.js"></script>
 </body>
 </html>

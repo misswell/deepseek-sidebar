@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Harness browser target</title>
+</head>
+<body>
+  <main>
+    <h1>Browser operator test page</h1>
+    <label for="query">Search</label>
+    <input id="query" name="query" placeholder="Type a query">
+    <button id="submit" type="button">Run search</button>
+    <p id="result">Waiting</p>
+  </main>
+  <script>
+    document.getElementById('submit').addEventListener('click', () => {
+      document.getElementById('result').textContent = 'Searched: ' + document.getElementById('query').value;
+    });
+  </script>
+</body>
+</html>

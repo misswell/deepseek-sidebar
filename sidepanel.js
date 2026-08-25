@@ -13,11 +13,27 @@ const pageReaderStatus = document.getElementById('page-reader-status');
 const togglePageReaderBtn = document.getElementById('toggle-page-reader');
 const copyPageContentBtn = document.getElementById('copy-page-content');
 const closePageReaderBtn = document.getElementById('close-page-reader');
+const harnessPanel = document.getElementById('harness-panel');
+const harnessState = document.getElementById('harness-state');
+const harnessStateLabel = document.getElementById('harness-state-label');
+const harnessEndpoint = document.getElementById('harness-endpoint');
+const harnessOpenBtn = document.getElementById('harness-open');
+const harnessRefreshSnapshotBtn = document.getElementById('harness-refresh-snapshot');
+const harnessPageTitle = document.getElementById('harness-page-title');
+const harnessPageUrl = document.getElementById('harness-page-url');
+const harnessSnapshotMeta = document.getElementById('harness-snapshot-meta');
+const harnessTask = document.getElementById('harness-task');
+const harnessAutoRun = document.getElementById('harness-auto-run');
+const harnessRunBtn = document.getElementById('harness-run');
+const harnessStatus = document.getElementById('harness-status');
+const harnessLogList = document.getElementById('harness-log-list');
 
 const ZOOM_KEY = 'deepseek-sidebar-zoom';
 const APP_KEY = 'deepseek-sidebar-app';
 const VISIBILITY_KEY = 'deepseek-sidebar-visibility';
 const ORDER_KEY = 'deepseek-sidebar-order';
+const HARNESS_URL_KEY = 'deepseek-sidebar-harness-url';
+const HARNESS_SESSION_KEY = 'deepseek-sidebar-harness-session';
 const ZOOM_STEP = 10;
 const ZOOM_MIN = 30;
 const ZOOM_MAX = 200;
@@ -31,6 +47,7 @@ const IFRAME_ALLOW = [
 ].join('; ');
 
 const APPS = {
+  harness: { harness: true },
   deepseek: { url: 'https://chat.deepseek.com/' },
   zhipu: { url: 'https://chat.z.ai/' },
   qianwen: { url: 'https://www.qianwen.com/' },
@@ -42,6 +59,7 @@ const APPS = {
 
 // App metadata for dynamic button rendering — order matters
 const APP_META = [
+  { id: 'harness', name: 'DeepSeek Harness', icon: 'icons/icon-deep.png' },
   { id: 'deepseek', name: 'DeepSeek', icon: 'icons/deepseek.png' },
   { id: 'zhipu', name: '智谱', icon: 'icons/zhipu.svg' },
   { id: 'qianwen', name: '千问', icon: 'icons/qianwen.png' },
@@ -54,6 +72,11 @@ const APP_META = [
 let currentZoom = 100;
 let currentApp = null;
 let currentPageText = '';
+let currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
+let currentHarnessSessionId = '';
+let currentHarnessSnapshot = null;
+let harnessRunning = false;
+let harnessAbortController = null;
 let lastFillRequestId = 0;
 let pickingTabId = null;
 let pickCancelled = false;
@@ -113,6 +136,9 @@ function loadAppVisibility() {
         } else {
           APP_META.forEach(app => { appVisibility[app.id] = true; });
         }
+        APP_META.forEach(app => {
+          if (typeof appVisibility[app.id] !== 'boolean') appVisibility[app.id] = true;
+        });
         const savedOrder = result[ORDER_KEY];
         if (Array.isArray(savedOrder)) {
           appOrder = savedOrder.filter(id => APP_META.some(a => a.id === id));
@@ -149,6 +175,18 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
     renderAppButtons();
   }
+  if (changes[HARNESS_URL_KEY]) {
+    try {
+      currentHarnessUrl = DeepSeekHarnessProtocol.normalizeHarnessUrl(changes[HARNESS_URL_KEY].newValue);
+    } catch (e) {
+      currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
+    }
+    updateHarnessEndpoint();
+    if (currentApp === 'harness') refreshHarnessConnection(true);
+  }
+  if (changes[HARNESS_SESSION_KEY]) {
+    currentHarnessSessionId = changes[HARNESS_SESSION_KEY].newValue || '';
+  }
 });
 
 function applyZoomToFrame(frame) {
@@ -174,6 +212,7 @@ function setupFrameLoadState(frame, appId) {
 }
 
 function getOrCreateFrame(appId) {
+  if (appId === 'harness') return null;
   const existingFrame = frames.get(appId);
   if (existingFrame) return existingFrame;
 
@@ -197,6 +236,16 @@ function switchApp(appId) {
   if (!app) return;
   currentApp = appId;
   appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === appId));
+  if (appId === 'harness') {
+    frames.forEach(item => item.classList.add('hidden'));
+    harnessPanel.classList.remove('hidden');
+    loading.classList.add('hidden');
+    updateHarnessEndpoint();
+    refreshHarnessPanel(true);
+    try { chrome.storage.local.set({ [APP_KEY]: appId }); } catch (e) {}
+    return;
+  }
+  harnessPanel.classList.add('hidden');
   getOrCreateFrame(appId);
   frames.forEach((item, id) => item.classList.toggle('hidden', id !== appId));
   if (loadedApps.has(appId)) loading.classList.add('hidden');
@@ -213,6 +262,328 @@ function applyZoom(zoom) {
   frames.forEach(applyZoomToFrame);
   zoomLabel.textContent = currentZoom + '%';
   try { chrome.storage.local.set({ [ZOOM_KEY]: currentZoom }); } catch (e) {}
+}
+
+function updateHarnessEndpoint() {
+  harnessEndpoint.textContent = currentHarnessUrl;
+}
+
+function setHarnessConnectionState(state, label) {
+  harnessState.classList.remove('connected', 'error');
+  if (state === 'connected' || state === 'error') harnessState.classList.add(state);
+  harnessStateLabel.textContent = label;
+}
+
+function setHarnessStatus(message, kind) {
+  harnessStatus.textContent = message || '';
+  harnessStatus.classList.remove('error', 'success');
+  if (kind) harnessStatus.classList.add(kind);
+}
+
+function appendHarnessLog(message, kind) {
+  if (!message) return;
+  if (harnessLogList.children.length === 1 &&
+      harnessLogList.firstElementChild.textContent.startsWith('输入任务后')) {
+    harnessLogList.innerHTML = '';
+  }
+  const item = document.createElement('div');
+  item.className = 'harness-log-item' + (kind ? ' ' + kind : '');
+  item.textContent = message;
+  harnessLogList.appendChild(item);
+  while (harnessLogList.children.length > 24) harnessLogList.firstElementChild.remove();
+  item.scrollIntoView({ block: 'nearest' });
+}
+
+function permissionContains(origins) {
+  return new Promise(resolve => {
+    try {
+      chrome.permissions.contains({ origins }, granted => {
+        void chrome.runtime.lastError;
+        resolve(Boolean(granted));
+      });
+    } catch (error) {
+      resolve(false);
+    }
+  });
+}
+
+function requestOriginPermission(origin) {
+  return new Promise(resolve => {
+    try {
+      chrome.permissions.request({ origins: [origin] }, granted => {
+        void chrome.runtime.lastError;
+        resolve(Boolean(granted));
+      });
+    } catch (error) {
+      resolve(false);
+    }
+  });
+}
+
+function unsupportedAutomationUrl(url) {
+  return !url || /^(chrome|chrome-extension|edge|about|view-source):/i.test(url) ||
+    /^https?:\/\/chrome\.google\.com\/webstore/i.test(url);
+}
+
+async function ensureAutomationPermission(tab) {
+  if (!tab || unsupportedAutomationUrl(tab.url)) return false;
+  let origin;
+  try {
+    const url = new URL(tab.url);
+    if (!['http:', 'https:', 'file:'].includes(url.protocol)) return false;
+    if (url.protocol === 'file:') origin = 'file:///*';
+    else origin = url.origin + '/*';
+  } catch (error) {
+    return false;
+  }
+  if (await permissionContains([origin])) return true;
+  return await requestOriginPermission(origin);
+}
+
+function sendHarnessPageCommand(tabId, command, action) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
+      source: 'deepseek-sidebar-harness',
+      tabId,
+      command,
+      action
+    }, response => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+      if (!response || response.ok !== true) {
+        reject(new Error(response && response.error ? response.error : '浏览器没有返回结果'));
+        return;
+      }
+      resolve(response.value);
+    });
+  });
+}
+
+function createHarnessClient(options) {
+  return new DeepSeekHarnessClient(currentHarnessUrl, {
+    ...(options || {}),
+    transport: DeepSeekHarnessTransport.request
+  });
+}
+
+async function ensureHarnessServerPermission() {
+  const origin = DeepSeekHarnessProtocol.harnessOriginPattern(currentHarnessUrl);
+  if (await permissionContains([origin])) return true;
+  return await requestOriginPermission(origin);
+}
+
+function updateHarnessSnapshotCard(snapshot) {
+  currentHarnessSnapshot = snapshot;
+  harnessPageTitle.textContent = snapshot && snapshot.title ? snapshot.title : '未命名页面';
+  harnessPageUrl.textContent = snapshot && snapshot.url ? snapshot.url : '';
+  const interactiveCount = snapshot && Array.isArray(snapshot.interactive) ? snapshot.interactive.length : 0;
+  const textLength = snapshot && snapshot.text ? snapshot.text.length : 0;
+  harnessSnapshotMeta.textContent = snapshot
+    ? interactiveCount + ' 个可交互元素 · ' + textLength + ' 字符可见内容'
+    : '';
+}
+
+async function getHarnessPageSnapshot(tabId, signal) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (signal && signal.aborted) throw new Error('任务已停止');
+    try {
+      return await sendHarnessPageCommand(tabId, 'snapshot');
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 650));
+    }
+  }
+  throw lastError || new Error('无法读取当前页面');
+}
+
+async function refreshHarnessConnection(silent) {
+  try {
+    const client = createHarnessClient({ timeoutMs: 6000 });
+    const info = await client.describe();
+    const model = info && (info.model || info.provider);
+    setHarnessConnectionState('connected', model ? '已连接 · ' + model : '已连接');
+    if (!silent) setHarnessStatus('本地 Harness 已连接。', 'success');
+    return info;
+  } catch (error) {
+    setHarnessConnectionState('error', '连接失败');
+    if (!silent) setHarnessStatus(error && error.message ? error.message : '无法连接 Harness', 'error');
+    return null;
+  }
+}
+
+async function refreshHarnessPanel(silent) {
+  updateHarnessEndpoint();
+  const connection = await refreshHarnessConnection(silent);
+  if (!connection) return;
+  try {
+    if (!(await ensureHarnessServerPermission())) {
+      throw new Error('需要允许扩展访问 Harness 服务地址。');
+    }
+    const tab = await queryActiveTab();
+    if (unsupportedAutomationUrl(tab.url)) {
+      updateHarnessSnapshotCard(null);
+      harnessPageTitle.textContent = '此页面不允许扩展读取';
+      harnessSnapshotMeta.textContent = '请切换到普通 http/https 网页';
+      if (!silent) setHarnessStatus('当前 Chrome 系统页面不能被网页代理访问。', 'error');
+      return;
+    }
+    if (!(await ensureAutomationPermission(tab))) {
+      updateHarnessSnapshotCard(null);
+      harnessPageTitle.textContent = '等待网页访问权限';
+      harnessSnapshotMeta.textContent = '点击“运行任务”时可以再次授权';
+      return;
+    }
+    const snapshot = await getHarnessPageSnapshot(tab.id);
+    updateHarnessSnapshotCard(snapshot);
+    if (!silent) setHarnessStatus('页面快照已更新。', 'success');
+  } catch (error) {
+    updateHarnessSnapshotCard(null);
+    harnessPageTitle.textContent = '无法读取当前页面';
+    harnessSnapshotMeta.textContent = '点击刷新或运行任务重试';
+    if (!silent) setHarnessStatus(error && error.message ? error.message : '无法读取当前页面', 'error');
+  }
+}
+
+function executeHarnessAction(tabId, action) {
+  return sendHarnessPageCommand(tabId, 'execute', action);
+}
+
+function waitForHarnessAction(action) {
+  const delay = action && action.type === 'navigate' ? 1200
+    : action && ['back', 'forward', 'reload'].includes(action.type) ? 900
+      : action && action.type === 'click' ? 450 : 180;
+  return new Promise(resolve => setTimeout(resolve, delay));
+}
+
+function stopHarnessTask() {
+  if (harnessAbortController) harnessAbortController.abort();
+  setHarnessStatus('正在停止后续动作…');
+}
+
+async function runHarnessTask() {
+  if (harnessRunning) {
+    stopHarnessTask();
+    return;
+  }
+  const task = harnessTask.value.trim();
+  if (!task) {
+    setHarnessStatus('先输入一个网页任务。', 'error');
+    harnessTask.focus();
+    return;
+  }
+
+  harnessRunning = true;
+  harnessAbortController = new AbortController();
+  const signal = harnessAbortController.signal;
+  harnessRunBtn.textContent = '停止任务';
+  harnessRunBtn.disabled = false;
+  harnessRefreshSnapshotBtn.disabled = true;
+  setHarnessStatus('正在读取当前页面…');
+  harnessLogList.innerHTML = '';
+  appendHarnessLog('任务：' + task);
+
+  try {
+    if (!(await ensureHarnessServerPermission())) {
+      throw new Error('需要允许扩展访问 Harness 服务地址。');
+    }
+    const tab = await queryActiveTab();
+    if (!(await ensureAutomationPermission(tab))) {
+      throw new Error('需要允许扩展访问当前网页，才能读取和操作它。');
+    }
+    const snapshot = await getHarnessPageSnapshot(tab.id, signal);
+    updateHarnessSnapshotCard(snapshot);
+    setHarnessConnectionState('connected', '正在规划动作…');
+
+    const client = createHarnessClient({
+      maxWaitMs: 90000,
+      timeoutMs: 20000
+    });
+    await client.describe({ signal });
+
+    let sessionId = currentHarnessSessionId || '';
+    let previousResults = [];
+    let lastMessage = '';
+    let completed = false;
+
+    for (let round = 0; round < 5; round += 1) {
+      if (signal.aborted) throw new Error('任务已停止');
+      if (round > 0) {
+        const refreshed = await getHarnessPageSnapshot(tab.id, signal);
+        updateHarnessSnapshotCard(refreshed);
+      }
+      const prompt = DeepSeekHarnessProtocol.buildBrowserTaskPrompt({
+        task,
+        snapshot: currentHarnessSnapshot || snapshot,
+        continuation: round > 0,
+        previousResults
+      });
+      appendHarnessLog('第 ' + (round + 1) + ' 轮：请求 Harness 规划…');
+      const response = await client.runPrompt(prompt, { sessionId, signal, maxWaitMs: 90000 });
+      sessionId = response.sessionId;
+      currentHarnessSessionId = sessionId;
+      try { chrome.storage.local.set({ [HARNESS_SESSION_KEY]: sessionId }); } catch (e) {}
+
+      const parsed = DeepSeekHarnessProtocol.parseBrowserActionResponse(response.text);
+      lastMessage = parsed.message || '';
+      if (lastMessage) appendHarnessLog(lastMessage, 'result');
+      if (!parsed.actions.length) {
+        completed = parsed.done;
+        if (!parsed.message) appendHarnessLog('Harness 没有返回可执行动作。', 'result');
+        break;
+      }
+
+      appendHarnessLog('模型提议 ' + parsed.actions.length + ' 个动作：' +
+        parsed.actions.map(DeepSeekHarnessProtocol.actionLabel).join('、'));
+      if (!harnessAutoRun.checked) {
+        appendHarnessLog(JSON.stringify(parsed.actions, null, 2), 'result');
+        setHarnessStatus('动作已生成，但“自动执行模型动作”处于关闭状态。');
+        break;
+      }
+
+      previousResults = [];
+      for (const action of parsed.actions) {
+        if (signal.aborted) throw new Error('任务已停止');
+        appendHarnessLog('执行：' + DeepSeekHarnessProtocol.actionLabel(action), 'action');
+        try {
+          const result = await executeHarnessAction(tab.id, action);
+          previousResults.push({ action, ok: true, result: result || null });
+          await waitForHarnessAction(action);
+        } catch (error) {
+          previousResults.push({ action, ok: false, error: error.message });
+          appendHarnessLog('动作失败：' + error.message, 'error');
+          throw error;
+        }
+      }
+
+      if (parsed.done) {
+        completed = true;
+        break;
+      }
+      setHarnessStatus('动作已执行，正在读取页面变化…');
+    }
+
+    setHarnessConnectionState('connected', '已连接');
+    setHarnessStatus(completed ? (lastMessage || '任务已完成。') : '已执行本轮动作，可继续描述下一步。', 'success');
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    if (signal.aborted || message === '任务已停止') {
+      appendHarnessLog('任务已停止。', 'result');
+      setHarnessStatus('任务已停止。');
+    } else {
+      appendHarnessLog(message, 'error');
+      setHarnessConnectionState('error', '需要检查连接');
+      setHarnessStatus(message, 'error');
+    }
+  } finally {
+    harnessRunning = false;
+    harnessAbortController = null;
+    harnessRunBtn.textContent = '运行任务';
+    harnessRefreshSnapshotBtn.disabled = false;
+  }
 }
 
 function queryActiveTab() {
@@ -756,6 +1127,10 @@ configBtn.addEventListener('click', () => {
   }
 });
 reloadBtn.addEventListener('click', () => {
+  if (currentApp === 'harness') {
+    refreshHarnessPanel(false);
+    return;
+  }
   const frame = frames.get(currentApp);
   if (!frame) return;
   loadedApps.delete(currentApp);
@@ -764,6 +1139,21 @@ reloadBtn.addEventListener('click', () => {
   hideLoadingIfStillWaiting(currentApp);
 });
 zoomLabel.addEventListener('dblclick', () => applyZoom(100));
+harnessOpenBtn.addEventListener('click', () => {
+  try {
+    chrome.tabs.create({ url: currentHarnessUrl });
+  } catch (error) {
+    setHarnessStatus('无法打开 Harness 页面。', 'error');
+  }
+});
+harnessRefreshSnapshotBtn.addEventListener('click', () => refreshHarnessPanel(false));
+harnessRunBtn.addEventListener('click', runHarnessTask);
+harnessTask.addEventListener('keydown', event => {
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    event.preventDefault();
+    runHarnessTask();
+  }
+});
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); applyZoom(currentZoom + ZOOM_STEP); }
@@ -793,13 +1183,17 @@ setTimeout(() => loading.classList.add('hidden'), 8000);
   let savedZoom = 100;
   try {
     const result = await new Promise((resolve, reject) => {
-      chrome.storage.local.get([ZOOM_KEY, APP_KEY], resolve);
+      chrome.storage.local.get([ZOOM_KEY, APP_KEY, HARNESS_URL_KEY, HARNESS_SESSION_KEY], resolve);
     });
     savedApp = result[APP_KEY] || 'deepseek';
     savedZoom = result[ZOOM_KEY] || 100;
+    currentHarnessUrl = DeepSeekHarnessProtocol.normalizeHarnessUrl(result[HARNESS_URL_KEY]);
+    currentHarnessSessionId = result[HARNESS_SESSION_KEY] || '';
   } catch (e) {
     // use defaults
+    currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
   }
+  updateHarnessEndpoint();
   // If saved app is hidden, fall back to first visible app
   if (appVisibility[savedApp] === false) {
     const orderedIds = appOrder.length > 0 ? appOrder : APP_META.map(a => a.id);
