@@ -1,5 +1,6 @@
 const PAGE_BRIDGE_FILE = 'page-bridge.js';
 const HARNESS_HOST_BRIDGE_FILE = 'harness-host-bridge.js';
+const HARNESS_EMBEDDED_SOURCE = 'deepseek-sidebar-harness-embedded';
 const harnessHostTabPromises = new Map();
 
 chrome.action.onClicked.addListener((tab) => {
@@ -27,6 +28,18 @@ function sendPageCommand(tabId, message, sendResponse) {
       });
     }
   );
+}
+
+function sendPageCommandAsync(tabId, message) {
+  return new Promise((resolve, reject) => {
+    sendPageCommand(tabId, message, response => {
+      if (!response || response.ok !== true) {
+        reject(new Error(response && response.error ? response.error : '页面没有返回结果'));
+        return;
+      }
+      resolve(response.value);
+    });
+  });
 }
 
 function isHttpUrl(value) {
@@ -90,6 +103,13 @@ function queryTabs(query) {
       else resolve(tabs || []);
     });
   });
+}
+
+async function getActiveWebTab() {
+  const tabs = await queryTabs({ active: true, lastFocusedWindow: true });
+  const tab = tabs.find(item => typeof item.id === 'number');
+  if (!tab || typeof tab.id !== 'number') throw new Error('未找到当前标签页');
+  return tab;
 }
 
 function createTab(createProperties) {
@@ -238,16 +258,123 @@ async function proxyHarnessRpc(message) {
   return response.value;
 }
 
+async function proxyHarnessProbe(message) {
+  let base;
+  try {
+    base = new URL(message.baseUrl);
+  } catch (error) {
+    throw new Error('Harness 地址无效');
+  }
+  if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password) {
+    throw new Error('Harness 地址只能使用 http 或 https');
+  }
+  const tabId = await ensureHarnessHostTab(base.toString());
+  const response = await sendTabMessage(tabId, {
+    source: 'deepseek-sidebar-harness-host-page',
+    command: 'probe'
+  });
+  if (!response || response.ok !== true) {
+    throw new Error(response && response.error ? response.error : 'Harness 宿主页面没有返回结果');
+  }
+  return response.value;
+}
+
+function waitForEmbeddedAction(action) {
+  const type = action && action.type;
+  const delay = type === 'navigate' ? 1200
+    : type === 'back' || type === 'forward' || type === 'reload' ? 1000
+      : type === 'click' ? 450 : 180;
+  return new Promise(resolve => setTimeout(resolve, delay));
+}
+
+async function executeEmbeddedActions(actions) {
+  const tab = await getActiveWebTab();
+  if (!Array.isArray(actions) || actions.length === 0) {
+    throw new Error('Harness 没有返回可执行动作');
+  }
+
+  const results = [];
+  for (const action of actions.slice(0, 8)) {
+    try {
+      const value = await new Promise((resolve, reject) => {
+        executeBrowserLevelAction(tab.id, action, response => {
+          if (!response || response.ok !== true) {
+            reject(new Error(response && response.error ? response.error : '浏览器动作失败'));
+            return;
+          }
+          resolve(response.value || null);
+        });
+      });
+      await waitForEmbeddedAction(action);
+      results.push({ action, ok: true, result: value });
+    } catch (error) {
+      results.push({
+        action,
+        ok: false,
+        error: error && error.message ? error.message : String(error)
+      });
+      break;
+    }
+  }
+
+  return {
+    tab: {
+      id: tab.id,
+      title: tab.title || '',
+      url: tab.url || ''
+    },
+    results
+  };
+}
+
+async function getEmbeddedSnapshot() {
+  const tab = await getActiveWebTab();
+  const snapshot = await sendPageCommandAsync(tab.id, {
+    source: 'deepseek-sidebar-harness-page',
+    command: 'snapshot'
+  });
+  return {
+    tab: {
+      id: tab.id,
+      title: tab.title || '',
+      url: tab.url || ''
+    },
+    snapshot
+  };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.source === 'deepseek-sidebar-harness-host') {
-    if (message.command !== 'rpc') {
+    if (!['rpc', 'probe'].includes(message.command)) {
       sendResponse({ ok: false, error: '未知 Harness 宿主命令' });
       return false;
+    }
+    if (message.command === 'probe') {
+      proxyHarnessProbe(message)
+        .then(value => sendResponse({ ok: true, value }))
+        .catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
     }
     proxyHarnessRpc(message)
       .then(value => sendResponse({ ok: true, value }))
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
+  }
+  if (message && message.source === HARNESS_EMBEDDED_SOURCE) {
+    if (message.command === 'snapshot') {
+      getEmbeddedSnapshot()
+        .then(value => sendResponse({ ok: true, value }))
+        .catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
+    }
+    if (message.command === 'execute') {
+      executeEmbeddedActions(message.actions)
+        .then(value => sendResponse({ ok: true, value }))
+        .catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
+    }
+    sendResponse({ ok: false, error: '未知 Harness 嵌入桥命令' });
+    return false;
   }
   if (!message || message.source !== 'deepseek-sidebar-harness') return undefined;
   const tabId = Number(message.tabId);

@@ -196,6 +196,27 @@ function requestHarnessPermission(url) {
   });
 }
 
+function probeHarness(url) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
+      source: 'deepseek-sidebar-harness-host',
+      command: 'probe',
+      baseUrl: url
+    }, response => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message));
+        return;
+      }
+      if (!response || response.ok !== true) {
+        reject(new Error(response && response.error ? response.error : 'Harness 没有返回结果'));
+        return;
+      }
+      resolve(response.value);
+    });
+  });
+}
+
 async function testHarnessConnection() {
   let url;
   try {
@@ -212,14 +233,12 @@ async function testHarnessConnection() {
     if (!(await requestHarnessPermission(url))) {
       throw new Error('没有获得该 Harness 地址的访问权限。');
     }
-    const client = new DeepSeekHarnessClient(url, {
-      timeoutMs: 8000,
-      transport: DeepSeekHarnessTransport.request
-    });
-    const info = await client.describe();
-    const model = info && (info.model || info.provider);
+    const info = await probeHarness(url);
+    if (!info || info.ok !== true) {
+      throw new Error('Harness 返回了异常状态（HTTP ' + (info && info.status ? info.status : '未知') + '）');
+    }
     harnessUrlInput.value = url;
-    harnessStatusEl.textContent = model ? '连接成功 · ' + model : '连接成功';
+    harnessStatusEl.textContent = info.title ? '连接成功 · ' + info.title : '连接成功';
   } catch (e) {
     harnessStatusEl.textContent = e && e.message ? e.message : '连接失败';
     harnessStatusEl.classList.add('error');

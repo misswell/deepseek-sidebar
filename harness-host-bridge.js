@@ -5,11 +5,25 @@
   window.__deepseekSidebarHarnessHostBridgeInstalled = true;
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!message || message.source !== 'deepseek-sidebar-harness-host-page' || message.command !== 'rpc') {
+    if (!message || message.source !== 'deepseek-sidebar-harness-host-page' ||
+        !['rpc', 'probe'].includes(message.command)) {
       return undefined;
     }
 
     Promise.resolve().then(async () => {
+      if (message.command === 'probe') {
+        const response = await fetch(location.href, {
+          method: 'GET',
+          credentials: 'same-origin'
+        });
+        const text = await response.text();
+        const titleMatch = text.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        return {
+          ok: response.ok,
+          status: response.status,
+          title: titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : ''
+        };
+      }
       const apiUrl = new URL(message.apiPath || '', location.origin + '/');
       if (apiUrl.origin !== location.origin || apiUrl.pathname.indexOf('/api/') === -1) {
         throw new Error('Harness 宿主页面拒绝了跨源 API 地址');

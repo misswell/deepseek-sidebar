@@ -24,6 +24,11 @@
 - **请求头修改** — 自动移除 X-Frame-Options / Content-Security-Policy 响应头，使 AI 站点可在侧边栏 iframe 中加载
 - **简洁工具栏** — 深色主题，不干扰对话体验
 
+## 1.9.2
+
+- 将用户配置的 DeepSeek Harness 原生网页界面嵌入侧边栏，并桥接当前标签页快照与网页动作执行
+- 支持 Harness 返回多轮结构化动作，自动回填执行结果继续完成任务
+
 ## 安装
 
 ### 从 Chrome Web Store 安装
@@ -51,6 +56,7 @@
 ├── harness-protocol.js     # Harness RPC、动作解析和任务提示词
 ├── harness-extension-transport.js # 通过 Harness 同源宿主页转发扩展 RPC
 ├── harness-host-bridge.js  # 在 Harness 同源页面内转发 API 请求，避免放宽服务端 CORS
+├── harness-embedded-bridge.js # 嵌入侧栏的 Harness 原生界面与当前标签页操作桥
 ├── page-bridge.js          # 注入当前网页的快照与动作执行桥
 ├── sidepanel.html          # 侧边栏页面（工具栏 + iframe 容器 + 页面阅读器）
 ├── sidepanel.js            # 缩放控制、应用切换、元素选择、页面阅读器逻辑

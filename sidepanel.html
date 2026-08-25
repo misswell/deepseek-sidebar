@@ -113,6 +113,39 @@
 
     .webview-frame.hidden { display: none; }
 
+    .harness-embed-shell {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #fff;
+      z-index: 2;
+    }
+
+    .harness-embed-shell.hidden { display: none; }
+
+    .harness-bridge-status {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 4;
+      max-width: calc(100% - 16px);
+      padding: 4px 8px;
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #64748b;
+      font-size: 10px;
+      line-height: 1.2;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.16s ease;
+    }
+
+    .harness-bridge-status.visible { opacity: 1; }
+    .harness-bridge-status.error { color: #be123c; }
+    .harness-bridge-status.working { color: #0369a1; }
+    .harness-bridge-status.done { color: #047857; }
+
     .harness-panel {
       position: absolute;
       inset: 0;
@@ -590,6 +623,9 @@
     </div>
   </div>
   <div id="webview-container">
+    <div class="harness-embed-shell hidden" id="harness-embed-shell">
+      <div class="harness-bridge-status" id="harness-bridge-status" aria-live="polite"></div>
+    </div>
     <div class="harness-panel hidden" id="harness-panel">
       <div class="harness-hero">
         <div class="harness-connection">

@@ -13,6 +13,8 @@ const pageReaderStatus = document.getElementById('page-reader-status');
 const togglePageReaderBtn = document.getElementById('toggle-page-reader');
 const copyPageContentBtn = document.getElementById('copy-page-content');
 const closePageReaderBtn = document.getElementById('close-page-reader');
+const harnessEmbedShell = document.getElementById('harness-embed-shell');
+const harnessBridgeStatus = document.getElementById('harness-bridge-status');
 const harnessPanel = document.getElementById('harness-panel');
 const harnessState = document.getElementById('harness-state');
 const harnessStateLabel = document.getElementById('harness-state-label');
@@ -34,6 +36,7 @@ const VISIBILITY_KEY = 'deepseek-sidebar-visibility';
 const ORDER_KEY = 'deepseek-sidebar-order';
 const HARNESS_URL_KEY = 'deepseek-sidebar-harness-url';
 const HARNESS_SESSION_KEY = 'deepseek-sidebar-harness-session';
+const HARNESS_EMBEDDED_CONTENT_SCRIPT_ID = 'deepseek-sidebar-harness-embedded';
 const ZOOM_STEP = 10;
 const ZOOM_MIN = 30;
 const ZOOM_MAX = 200;
@@ -182,7 +185,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
       currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
     }
     updateHarnessEndpoint();
-    if (currentApp === 'harness') refreshHarnessConnection(true);
+    if (currentApp === 'harness') activateHarnessFrame(true);
   }
   if (changes[HARNESS_SESSION_KEY]) {
     currentHarnessSessionId = changes[HARNESS_SESSION_KEY].newValue || '';
@@ -207,12 +210,23 @@ function hideLoadingIfStillWaiting(appId) {
 function setupFrameLoadState(frame, appId) {
   frame.addEventListener('load', () => {
     loadedApps.add(appId);
+    if (appId === 'harness') {
+      setHarnessBridgeStatus('Harness 界面已加载，等待当前页面桥接…', 'working');
+      try {
+        frame.contentWindow.postMessage({
+          source: 'deepseek-sidebar-harness-embedded',
+          type: 'configure'
+        }, '*');
+      } catch (error) {}
+    }
     if (currentApp === appId) loading.classList.add('hidden');
+  });
+  frame.addEventListener('error', () => {
+    if (appId === 'harness') setHarnessBridgeStatus('无法加载 Harness 服务页面。', 'error');
   });
 }
 
 function getOrCreateFrame(appId) {
-  if (appId === 'harness') return null;
   const existingFrame = frames.get(appId);
   if (existingFrame) return existingFrame;
 
@@ -224,11 +238,106 @@ function getOrCreateFrame(appId) {
   frame.removeAttribute('sandbox');
   setupFrameLoadState(frame, appId);
   applyZoomToFrame(frame);
-  webviewContainer.appendChild(frame);
+  (appId === 'harness' ? harnessEmbedShell : webviewContainer).appendChild(frame);
   frames.set(appId, frame);
-  frame.src = app.url;
+  if (appId !== 'harness') frame.src = app.url;
   hideLoadingIfStillWaiting(appId);
   return frame;
+}
+
+function getRegisteredHarnessBridge() {
+  return new Promise((resolve, reject) => {
+    chrome.scripting.getRegisteredContentScripts(
+      { ids: [HARNESS_EMBEDDED_CONTENT_SCRIPT_ID] },
+      scripts => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+        resolve(scripts || []);
+      }
+    );
+  });
+}
+
+function registerHarnessBridge(url) {
+  const matches = [DeepSeekHarnessProtocol.harnessOriginPattern(url)];
+  const registration = {
+    id: HARNESS_EMBEDDED_CONTENT_SCRIPT_ID,
+    matches,
+    js: ['harness-embedded-bridge.js'],
+    runAt: 'document_idle',
+    allFrames: true,
+    persistAcrossSessions: false
+  };
+
+  return getRegisteredHarnessBridge().then(existing => {
+    if (existing.length) {
+      return new Promise((resolve, reject) => {
+        chrome.scripting.updateRegisteredContentScripts([registration], () => {
+          const error = chrome.runtime.lastError;
+          if (error) reject(new Error(error.message));
+          else resolve();
+        });
+      });
+    }
+    return new Promise((resolve, reject) => {
+      chrome.scripting.registerContentScripts([registration], () => {
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve();
+      });
+    });
+  });
+}
+
+async function ensureHarnessEmbeddedBridge() {
+  if (!(await ensureHarnessServerPermission())) {
+    throw new Error('需要允许扩展访问 Harness 服务地址。');
+  }
+  await registerHarnessBridge(currentHarnessUrl);
+}
+
+function setHarnessBridgeStatus(message, state) {
+  if (!message) {
+    harnessBridgeStatus.textContent = '';
+    harnessBridgeStatus.classList.remove('visible', 'error', 'working', 'done');
+    return;
+  }
+  harnessBridgeStatus.textContent = message;
+  harnessBridgeStatus.classList.remove('error', 'working', 'done');
+  if (state) harnessBridgeStatus.classList.add(state);
+  harnessBridgeStatus.classList.add('visible');
+  if (state === 'ready' || state === 'done') {
+    setTimeout(() => {
+      if (harnessBridgeStatus.textContent === message) {
+        harnessBridgeStatus.classList.remove('visible');
+      }
+    }, 2600);
+  }
+}
+
+async function activateHarnessFrame(forceReload) {
+  try {
+    await ensureHarnessEmbeddedBridge();
+  } catch (error) {
+    setHarnessBridgeStatus(error && error.message ? error.message : 'Harness 桥接未启用', 'error');
+  }
+  if (currentApp !== 'harness') return;
+
+  const frame = getOrCreateFrame('harness');
+  frame.classList.remove('hidden');
+  const targetUrl = currentHarnessUrl + '/';
+  const needsNavigation = forceReload || frame.dataset.harnessUrl !== currentHarnessUrl;
+  frame.dataset.harnessUrl = currentHarnessUrl;
+  if (needsNavigation || !frame.src || frame.src === 'about:blank') {
+    loadedApps.delete('harness');
+    loading.classList.remove('hidden');
+    frame.src = targetUrl;
+  } else if (loadedApps.has('harness')) {
+    loading.classList.add('hidden');
+  }
 }
 
 function switchApp(appId) {
@@ -237,14 +346,17 @@ function switchApp(appId) {
   currentApp = appId;
   appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === appId));
   if (appId === 'harness') {
-    frames.forEach(item => item.classList.add('hidden'));
+    frames.forEach((item, id) => item.classList.toggle('hidden', id !== appId));
+    harnessEmbedShell.classList.remove('hidden');
     harnessPanel.classList.remove('hidden');
-    loading.classList.add('hidden');
+    harnessPanel.classList.add('hidden');
+    loading.classList.remove('hidden');
     updateHarnessEndpoint();
-    refreshHarnessPanel(true);
+    activateHarnessFrame();
     try { chrome.storage.local.set({ [APP_KEY]: appId }); } catch (e) {}
     return;
   }
+  harnessEmbedShell.classList.add('hidden');
   harnessPanel.classList.add('hidden');
   getOrCreateFrame(appId);
   frames.forEach((item, id) => item.classList.toggle('hidden', id !== appId));
@@ -1128,7 +1240,7 @@ configBtn.addEventListener('click', () => {
 });
 reloadBtn.addEventListener('click', () => {
   if (currentApp === 'harness') {
-    refreshHarnessPanel(false);
+    activateHarnessFrame(true);
     return;
   }
   const frame = frames.get(currentApp);
@@ -1162,6 +1274,18 @@ document.addEventListener('keydown', (e) => {
 
 window.addEventListener('message', (event) => {
   const data = event.data || {};
+  const harnessFrame = frames.get('harness');
+  if (data.source === 'deepseek-sidebar-harness-embedded' &&
+      harnessFrame && event.source === harnessFrame.contentWindow) {
+    if (data.type === 'ready') {
+      setHarnessBridgeStatus('当前标签页桥接已就绪', 'done');
+    } else if (data.type === 'status') {
+      setHarnessBridgeStatus(data.message || '', data.state || 'ready');
+    } else if (data.type === 'error') {
+      setHarnessBridgeStatus(data.message || '网页操作桥接失败', 'error');
+    }
+    return;
+  }
   if (data.source !== 'deepseek-sidebar' || data.type !== 'fill-input-result') return;
   const frame = frames.get(currentApp);
   if (!frame || event.source !== frame.contentWindow) return;
