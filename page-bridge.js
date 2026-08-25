@@ -1,8 +1,8 @@
 (function installDeepSeekPageBridge() {
   'use strict';
 
-  if (window.__deepseekSidebarHarnessBridgeInstalled) return;
-  window.__deepseekSidebarHarnessBridgeInstalled = true;
+  if (window.__deepseekSidebarPageBridgeInstalled) return;
+  window.__deepseekSidebarPageBridgeInstalled = true;
 
   const MAX_PAGE_TEXT = 16000;
   const MAX_INTERACTIVE = 80;

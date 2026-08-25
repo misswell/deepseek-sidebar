@@ -24,6 +24,11 @@
 - **请求头修改** — 自动移除 X-Frame-Options / Content-Security-Policy 响应头，使 AI 站点可在侧边栏 iframe 中加载
 - **简洁工具栏** — 深色主题，不干扰对话体验
 
+## 1.9.3
+
+- 修复本地网页同时匹配 Harness 内容脚本时，页面操作桥接器被错误跳过的问题
+- 通过真实 Chrome Side Panel 验证 Harness 原生网页、当前页面快照和多轮动作闭环
+
 ## 1.9.2
 
 - 将用户配置的 DeepSeek Harness 原生网页界面嵌入侧边栏，并桥接当前标签页快照与网页动作执行

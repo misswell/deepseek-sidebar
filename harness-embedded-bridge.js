@@ -1,13 +1,13 @@
 (function installDeepSeekSidebarHarnessBridge() {
   'use strict';
 
-  if (window.__deepseekSidebarHarnessBridgeInstalled) return;
-  window.__deepseekSidebarHarnessBridgeInstalled = true;
-
   // The bridge only belongs to the Harness document embedded in the side panel.
   // A dynamically registered content script can also match a normal Harness tab,
   // so avoid changing that page when it is not inside the extension.
   if (window.parent === window || window.parent !== window.top) return;
+
+  if (window.__deepseekSidebarHarnessEmbeddedBridgeInstalled) return;
+  window.__deepseekSidebarHarnessEmbeddedBridgeInstalled = true;
 
   const SOURCE = 'deepseek-sidebar-harness-embedded';
   const MAX_ACTIONS = 8;
