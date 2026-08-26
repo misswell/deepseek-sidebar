@@ -24,6 +24,10 @@
 - **请求头修改** — 自动移除 X-Frame-Options / Content-Security-Policy 响应头，使 AI 站点可在侧边栏 iframe 中加载
 - **简洁工具栏** — 深色主题，不干扰对话体验
 
+## 1.9.4
+
+- 将普通网页访问权限改为与 Codex 一致的必需 `<all_urls>` 权限，修复百度等未预置站点无法读取和操作的问题
+
 ## 1.9.3
 
 - 修复本地网页同时匹配 Harness 内容脚本时，页面操作桥接器被错误跳过的问题
@@ -50,7 +54,7 @@
 3. 开启右上角「开发者模式」
 4. 点击「加载已解压的扩展程序」，选择项目目录
 5. 打开扩展设置，在「DeepSeek Harness 网页代理」中填写服务地址并测试连接
-6. 在侧边栏点击 Harness 图标，输入网页任务；首次操作普通网页时允许扩展访问该页面
+6. 在侧边栏点击 Harness 图标，输入网页任务；首次安装或更新时请在 Chrome 权限提示中允许扩展访问网站
 
 ## 文件结构
 
@@ -84,7 +88,7 @@
 | tabs | 查询当前标签页，并创建后台 Harness 宿主页面 |
 | storage | 本地保存用户的缩放比例和应用选择设置 |
 | scripting | 点击选择按钮时向当前标签页注入一次性脚本，提取选中元素的可见文本 |
-| optional `<all_urls>` | 用户确认后读取和操作当前普通网页，以及访问自定义 Harness 地址 |
+| `<all_urls>` | 按 Codex 的方式读取和操作当前普通网页，以及访问自定义 Harness 地址 |
 | declarativeNetRequest | 移除 AI 聊天站点的 X-Frame-Options / Content-Security-Policy 响应头，使其可在侧边栏中加载 |
 | declarativeNetRequestWithHostAccess | 修改千问侧边栏 iframe 的 User-Agent 和 sec-ch-ua 请求头，使其正确渲染移动版页面 |
 | host_permissions | 访问 AI 站点、`http://127.0.0.1/*`、`http://localhost/*`，用于页面适配和本地 Harness 宿主桥 |

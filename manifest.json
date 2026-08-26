@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DeepSeek Sidebar",
-  "version": "1.9.3",
+  "version": "1.9.4",
   "description": "Open AI chat sites in Chrome sidebar and let a local DeepSeek Harness operate the current page",
   "permissions": [
     "sidePanel",
@@ -13,6 +13,7 @@
     "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
+    "<all_urls>",
     "http://127.0.0.1/*",
     "http://localhost/*",
     "https://chat.deepseek.com/*",
@@ -24,9 +25,6 @@
     "https://www.qianwen.com/*",
     "https://qianwen.com/*",
     "https://dict.youdao.com/*"
-  ],
-  "optional_host_permissions": [
-    "<all_urls>"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; frame-src http: https:"

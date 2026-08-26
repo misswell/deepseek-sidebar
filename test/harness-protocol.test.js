@@ -1,8 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+const manifest = require('../manifest.json');
 const protocol = require('../harness-protocol.js');
 const HarnessClient = require('../harness-client.js');
+
+test('grants the browser operator required access to ordinary web pages', () => {
+  assert.ok(manifest.host_permissions.includes('<all_urls>'));
+  assert.equal(manifest.optional_host_permissions, undefined);
+});
 
 test('normalizes Harness URLs without changing the host or port', () => {
   assert.equal(protocol.normalizeHarnessUrl('http://127.0.0.1:3080/'), 'http://127.0.0.1:3080');
