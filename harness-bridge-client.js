@@ -359,6 +359,56 @@
     }
   }
 
+  function probeBridge(options) {
+    const config = options || {};
+    const timeoutMs = Number.isFinite(config.timeoutMs)
+      ? Math.max(1, config.timeoutMs) : DEFAULT_HELLO_TIMEOUT_MS + 1000;
+    let client = null;
+    let timer = null;
+    let settled = false;
+
+    return new Promise((resolve, reject) => {
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        if (timer !== null) clearTimeout(timer);
+        if (client) client.stop();
+        callback(value);
+      };
+
+      client = new DeepSeekHarnessBridgeClient({
+        WebSocketImpl: config.WebSocketImpl,
+        reconnect: false,
+        helloTimeoutMs: Math.min(timeoutMs, DEFAULT_HELLO_TIMEOUT_MS),
+        onStateChange: state => {
+          if (settled) return;
+          if (state === 'connected') {
+            finish(resolve, { connected: true, caps: client.caps });
+          } else if (state === 'stopped' && client.lastError) {
+            finish(reject, new HarnessBridgeError('bridge-unavailable', client.lastError));
+          }
+        }
+      });
+
+      timer = setTimeout(() => {
+        finish(reject, new HarnessBridgeError(
+          'bridge-unavailable',
+          client.lastError || 'Harness bridge 握手超时'
+        ));
+      }, timeoutMs);
+
+      try {
+        client.start(config.url, config.token || '');
+      } catch (error) {
+        finish(reject, new HarnessBridgeError(
+          'bridge-unavailable',
+          error && error.message ? error.message : String(error)
+        ));
+      }
+    });
+  }
+
   DeepSeekHarnessBridgeClient.Error = HarnessBridgeError;
+  DeepSeekHarnessBridgeClient.probe = probeBridge;
   return DeepSeekHarnessBridgeClient;
 });

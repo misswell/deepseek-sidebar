@@ -231,12 +231,13 @@ function probeHarness(url) {
   });
 }
 
-function probeHarnessBridge(url) {
+function probeHarnessBridge(url, token) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
       source: 'deepseek-sidebar-harness-bridge',
-      command: 'resolve',
-      baseUrl: url
+      command: 'test',
+      baseUrl: url,
+      token: typeof token === 'string' ? token : ''
     }, response => {
       const runtimeError = chrome.runtime.lastError;
       if (runtimeError) {
@@ -244,12 +245,18 @@ function probeHarnessBridge(url) {
         return;
       }
       if (!response || response.ok !== true) {
-        reject(new Error(response && response.error ? response.error : '无法解析 Harness bridge 地址'));
+        reject(new Error(response && response.error ? response.error : 'Harness bridge 未完成握手'));
         return;
       }
       resolve(response.value);
     });
   });
+}
+
+function settledError(result) {
+  if (!result || result.status !== 'rejected') return '';
+  const reason = result.reason;
+  return reason && reason.message ? reason.message : String(reason || '未知错误');
 }
 
 async function testHarnessConnection() {
@@ -268,20 +275,38 @@ async function testHarnessConnection() {
     if (!(await requestHarnessPermission(url))) {
       throw new Error('没有获得该 Harness 地址的访问权限。');
     }
-    const [info, bridge] = await Promise.all([
+    const [infoResult, bridgeResult] = await Promise.allSettled([
       probeHarness(url),
-      probeHarnessBridge(url)
+      probeHarnessBridge(url, harnessTokenInput.value.trim())
     ]);
-    if (!info || info.ok !== true) {
-      throw new Error('Harness 返回了异常状态（HTTP ' + (info && info.status ? info.status : '未知') + '）');
-    }
+    const info = infoResult.status === 'fulfilled' ? infoResult.value : null;
+    const bridge = bridgeResult.status === 'fulfilled' ? bridgeResult.value : null;
+    const infoOk = Boolean(info && info.ok === true);
+    const bridgeOk = Boolean(bridge && bridge.connected === true);
+    const infoError = settledError(infoResult) ||
+      (info ? 'Harness 返回了异常状态（HTTP ' + (info.status || '未知') + '）' : '无法访问 Harness 页面');
+    const bridgeError = settledError(bridgeResult) ||
+      (bridge && bridge.error ? bridge.error : '未收到 hello.ok 握手响应');
+
     harnessUrlInput.value = url;
-    if (bridge && bridge.discovered) {
+    if (infoOk && bridgeOk) {
       harnessStatusEl.textContent = (info.title ? '连接成功 · ' + info.title : '连接成功') +
-        ' · 原生 bridge 已发现';
+        ' · 原生 bridge hello.ok 握手成功';
+      harnessStatusEl.classList.remove('error');
+    } else if (infoOk && !bridgeOk) {
+      const discoveryHint = bridge && bridge.discovered === false
+        ? '未发现 /ext/bridge-config；' : '';
+      harnessStatusEl.textContent = 'DSH 页面正常' +
+        (info.title ? ' · ' + info.title : '') +
+        '，但浏览器 bridge 未连接（' + discoveryHint + bridgeError +
+        '）。请安装并启动 dsh-browser bridge，再重试。';
+      harnessStatusEl.classList.add('error');
+    } else if (!infoOk && bridgeOk) {
+      harnessStatusEl.textContent = '原生 bridge 握手成功，但 DSH 页面检查失败：' + infoError;
+      harnessStatusEl.classList.add('error');
     } else {
-      harnessStatusEl.textContent = (info.title ? 'HTTP API 可用 · ' + info.title : 'HTTP API 可用') +
-        ' · 未发现原生 bridge，真实页面仍可打开但暂不能操作当前网页';
+      harnessStatusEl.textContent = '连接失败：' + infoError + '；浏览器 bridge：' + bridgeError;
+      harnessStatusEl.classList.add('error');
     }
   } catch (e) {
     harnessStatusEl.textContent = e && e.message ? e.message : '连接失败';

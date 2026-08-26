@@ -155,6 +155,69 @@ async function startHarnessBridge(baseUrl, token) {
   return harnessBridgeStatus();
 }
 
+async function waitForHarnessBridgeConnection(timeoutMs) {
+  const deadline = Date.now() + Math.max(1, Number(timeoutMs) || 5000);
+  let status = harnessBridgeStatus();
+  while (Date.now() < deadline) {
+    status = harnessBridgeStatus();
+    if (status.connected) return status;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return status;
+}
+
+async function testHarnessBridgeConnection(baseUrl, token) {
+  const resolved = await resolveHarnessBridgeUrl(baseUrl);
+  const existingClient = harnessBridgeClient;
+
+  // The official bridge allows only one active extension connection. Reuse the
+  // side panel's connection when possible instead of kicking it off just to
+  // run a settings-page health check.
+  if (existingClient && existingClient.running) {
+    if (harnessBridgeUrl !== resolved.url) {
+      throw makeHarnessBridgeError(
+        'bridge-busy',
+        '当前侧栏正在使用另一个 Harness 地址，请先关闭侧栏后再测试新地址'
+      );
+    }
+    const status = await waitForHarnessBridgeConnection(5000);
+    if (!status.connected) {
+      const discoveryHint = resolved.discovered ? '' : '未发现 /ext/bridge-config；';
+      throw makeHarnessBridgeError(
+        'bridge-unavailable',
+        discoveryHint + (status.error || 'Harness bridge 未完成 hello.ok 握手')
+      );
+    }
+    return { ...status, discovered: resolved.discovered };
+  }
+
+  let result;
+  try {
+    result = await DeepSeekHarnessBridgeClient.probe({
+      url: resolved.url,
+      token: token || '',
+      timeoutMs: 5000
+    });
+  } catch (error) {
+    const discoveryHint = resolved.discovered ? '' : '未发现 /ext/bridge-config；';
+    throw makeHarnessBridgeError(
+      error && error.code ? error.code : 'bridge-unavailable',
+      discoveryHint + (error && error.message ? error.message : 'Harness bridge 未完成 hello.ok 握手')
+    );
+  }
+  return {
+    source: HARNESS_BRIDGE_SOURCE,
+    type: 'status',
+    state: 'connected',
+    connected: true,
+    url: resolved.url,
+    error: '',
+    caps: result.caps || null,
+    targetTabId: null,
+    discovered: resolved.discovered
+  };
+}
+
 function stopHarnessBridge() {
   harnessBridgeUrl = '';
   harnessBridgeError = '';
@@ -750,6 +813,22 @@ function handleHarnessBridgeCommand(message, sendResponse) {
     Promise.resolve()
       .then(() => bindHarnessTarget(message.tabId))
       .then(value => sendResponse({ ok: true, value }))
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (command === 'test') {
+    Promise.resolve().then(async () => {
+      let baseUrl = message.baseUrl;
+      let token = message.token;
+      if (!baseUrl || !token) {
+        const stored = await new Promise(resolve => {
+          chrome.storage.local.get([HARNESS_URL_KEY, HARNESS_TOKEN_KEY], resolve);
+        });
+        if (!baseUrl) baseUrl = stored[HARNESS_URL_KEY];
+        if (!token) token = stored[HARNESS_TOKEN_KEY] || '';
+      }
+      return await testHarnessBridgeConnection(baseUrl, token);
+    }).then(value => sendResponse({ ok: true, value }))
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
   }

@@ -11,7 +11,7 @@
 - **复制页面内容** — 一键复制选中的页面元素文本到剪贴板
 - **真实 DeepSeek Harness 对话页** — 默认在侧边栏打开 `http://127.0.0.1:3080/`，也可以设置自己的 Harness 地址；通过 WebSocket bridge 让本地页面直接调用当前页面的 `browser_*` 工具
 - **页面与 DevTools 分离** — 扩展在当前标签页读取和执行页面动作；需要时还可把 Chrome DevTools Protocol 调用交给 `chrome.debugger`，不依赖 AI 网站输入框
-- **本地连接测试** — 在设置页验证 Harness API、原生 bridge 和可选 token；网页内容只在 Harness 请求浏览器工具时发送
+- **本地连接测试** — 在设置页同时验证 Harness 页面和原生 bridge 的 `hello.ok` 握手；网页内容只在 Harness 请求浏览器工具时发送
 - **按页面隔离侧栏** — 仿照 Codex 扩展，按 Chrome `tabId` 保存每个页面的应用、Harness 对话路由、阅读器和缩放状态；切换标签页时恢复各自的右侧窗口
 - **自由缩放** — 工具栏按钮或 Ctrl/Cmd +/-/0 快捷键，30%-200% 范围调节
 - **双击重置缩放** — 双击缩放百分比标签一键恢复 100%
@@ -24,6 +24,12 @@
 - **千问（qianwen.com）深度适配** — 自动修改 User-Agent 模拟移动设备、隐藏 iframe 检测、阻止 visibilitychange 等事件，确保千问移动版在侧边栏中正常渲染
 - **请求头修改** — 自动移除 X-Frame-Options / Content-Security-Policy 响应头，使 AI 站点可在侧边栏 iframe 中加载
 - **简洁工具栏** — 深色主题，不干扰对话体验
+
+## 1.9.8
+
+- 设置页的连接测试改为真实完成 WebSocket `hello.ok` 握手，不再把 `/ext/bridge-config` 的 200 响应误当作 bridge 可用
+- DSH 页面正常但浏览器 bridge 未安装/未启动时，明确显示分层错误原因
+- 增加 `scripts/install-dsh-bridge.sh`，一键构建并注册官方 `@yuxianglin/dsh-bridge-browser`
 
 ## 1.9.7
 
@@ -73,14 +79,15 @@
 2. 打开 `chrome://extensions`
 3. 开启右上角「开发者模式」
 4. 点击「加载已解压的扩展程序」，选择项目目录
-5. 启动 DeepSeek Harness，并安装能提供 `/ext/bridge` 的浏览器 bridge 插件。可参考 [dsh-browser](https://github.com/Lum1104/dsh-browser) 的安装脚本：
+5. 启动一次 DeepSeek Harness，然后在本仓库目录运行安装脚本，构建并注册官方浏览器 bridge：
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.sh | bash
+   ./scripts/install-dsh-bridge.sh
    ```
+   脚本会复用 `~/.dsh/dsh-browser`（不存在时下载官方源码），构建 `@yuxianglin/dsh-bridge-browser` 并注册到本机 `web` profile。若 DSH 已经在运行，请重启 DSH；脚本不会替换本扩展，也不会把页面内容写入 AI 输入框。
 6. 打开扩展设置，在「DeepSeek Harness 网页代理」中填写服务地址（默认 `http://127.0.0.1:3080/`）和可选 token，然后测试连接
 7. 在侧边栏打开 Harness 图标，直接使用本地 DeepSeek 对话页面发起任务；页面内容由扩展自己的 browser 工具读取，不会写入 DeepSeek/ChatGPT 等网站的输入框
 
-如果未发现 `/ext/bridge-config`，真实 Harness 页面仍会打开，但扩展无法启用原生网页工具；请安装带 bridge 插件的 Harness。Chrome 本机连接通常无需 token，远程地址请填写服务端 token。
+如果测试结果显示“DSH 页面正常，但浏览器 bridge 未连接”，说明本地对话页面可以打开，但 DSH 尚未加载浏览器 bridge；重新运行 `./scripts/install-dsh-bridge.sh` 并重启 DSH。Chrome 本机连接通常无需 token，远程地址请填写服务端 token。后续官方 bridge 更新时可再次运行该脚本。
 
 ## 文件结构
 
@@ -97,6 +104,7 @@
 ├── sidepanel.html          # 侧边栏页面（工具栏 + AI iframe + 本地 Harness 页面）
 ├── sidepanel.js            # 按标签页隔离的 iframe 路由、缩放、应用切换和页面工具逻辑
 ├── tab-state.js            # 标签页状态规范化、迁移和清理
+├── scripts/install-dsh-bridge.sh # 构建并注册官方 DSH 浏览器 bridge
 ├── ua-override.js          # 注入千问的 content script，修改 UA 并隐藏 iframe 检测
 ├── rules.json              # declarativeNetRequest 规则（移除响应头 + 修改请求头）
 ├── privacy-policy.html     # 隐私政策

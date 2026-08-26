@@ -268,6 +268,68 @@ test('bridge client performs hello, RPC, ping and tool result exchange', async (
   assert.equal(client.state, 'stopped');
 });
 
+test('bridge connection probe rejects a socket that never completes hello.ok', async () => {
+  class SilentWebSocket {
+    static OPEN = 1;
+    static CONNECTING = 0;
+    static CLOSED = 3;
+    static instances = [];
+
+    constructor(url) {
+      this.url = url;
+      this.readyState = SilentWebSocket.CONNECTING;
+      this.listeners = new Map();
+      SilentWebSocket.instances.push(this);
+    }
+
+    addEventListener(type, listener) {
+      const entries = this.listeners.get(type) || [];
+      entries.push(listener);
+      this.listeners.set(type, entries);
+    }
+
+    emit(type, event) {
+      (this.listeners.get(type) || []).slice().forEach(listener => listener(event || {}));
+    }
+
+    open() {
+      this.readyState = SilentWebSocket.OPEN;
+      this.emit('open');
+    }
+
+    send() {}
+
+    close() {
+      this.readyState = SilentWebSocket.CLOSED;
+      this.emit('close', { code: 1000, reason: '' });
+    }
+  }
+
+  const pending = HarnessBridgeClient.probe({
+    url: 'ws://127.0.0.1:3080/ext/bridge',
+    token: '',
+    timeoutMs: 30,
+    WebSocketImpl: SilentWebSocket
+  });
+  SilentWebSocket.instances[0].open();
+
+  await assert.rejects(pending, error => {
+    assert.equal(error.code, 'bridge-unavailable');
+    assert.match(error.message, /握手|连接/);
+    return true;
+  });
+});
+
+test('settings health check separates the Harness page from the authenticated bridge', () => {
+  const config = fs.readFileSync(path.join(ROOT_DIR, 'config.js'), 'utf8');
+  const background = fs.readFileSync(path.join(ROOT_DIR, 'background.js'), 'utf8');
+  assert.match(config, /command:\s*['"]test['"]/);
+  assert.match(config, /Promise\.allSettled/);
+  assert.match(config, /DSH 页面正常/);
+  assert.match(background, /command === ['"]test['"]/);
+  assert.match(background, /DeepSeekHarnessBridgeClient\.probe/);
+});
+
 test('loads a page bridge instead of input-filling content scripts', () => {
   assert.ok(manifest.permissions.includes('debugger'));
   const scripts = manifest.content_scripts.flatMap(item => item.js || []);

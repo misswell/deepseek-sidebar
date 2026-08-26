@@ -251,7 +251,7 @@
     <div class="harness-token-row">
       <input id="harnessToken" type="password" autocomplete="off" spellcheck="false" placeholder="本机 Chrome 通常可留空">
     </div>
-    <p class="harness-hint">默认地址为 http://127.0.0.1:3080/。本机 Chrome bridge 通常无需 token；远程或 Firefox bridge 请填入服务端 token。页面内容只通过原生 bridge 的浏览器工具按需读取。</p>
+    <p class="harness-hint">默认地址为 http://127.0.0.1:3080/。测试连接会同时检查 DSH 页面和原生 bridge 的 hello.ok 握手；本机 Chrome 通常无需 token，远程或 Firefox bridge 请填入服务端 token。页面内容只通过原生 bridge 的浏览器工具按需读取。</p>
     <div class="harness-status" id="harnessStatus"></div>
   </section>
   <div class="app-list" id="appList"></div>
