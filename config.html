@@ -220,6 +220,110 @@
       line-height: 1.45;
     }
 
+    .harness-install-card {
+      margin-top: 14px;
+      padding: 12px;
+      border: 1px solid #66502c;
+      border-radius: 9px;
+      background: rgba(39, 31, 21, 0.72);
+    }
+
+    .harness-install-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #ffe7b3;
+      font-size: 12px;
+    }
+
+    .harness-install-badge {
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #70572d;
+      color: #fff1c7;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .harness-install-card p,
+    .harness-install-steps {
+      color: #c4b38e;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .harness-install-card p { margin-top: 7px; }
+
+    .harness-install-steps {
+      margin: 8px 0 0 18px;
+      padding: 0;
+    }
+
+    .harness-command {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .harness-command code {
+      min-width: 0;
+      flex: 1;
+      overflow-x: auto;
+      padding: 7px 8px;
+      border: 1px solid #604b2c;
+      border-radius: 6px;
+      background: #17140f;
+      color: #ffe7b3;
+      font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      white-space: nowrap;
+    }
+
+    .btn-copy-command {
+      flex-shrink: 0;
+      padding: 7px 9px;
+      background: #3d3424;
+      color: #ffe7b3;
+      font-size: 11px;
+    }
+
+    .btn-copy-command:hover { background: #51432b; }
+
+    .harness-doc-link {
+      display: inline-block;
+      margin-top: 8px;
+      color: #a7f3d0;
+      font-size: 11px;
+    }
+
+    .harness-install-alert {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-top: 9px;
+      padding: 10px;
+      border: 1px solid #8a4552;
+      border-radius: 8px;
+      background: rgba(92, 35, 48, 0.45);
+      color: #ffd0d8;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .harness-install-alert[hidden] { display: none; }
+
+    .harness-install-alert strong {
+      display: block;
+      color: #fff1f2;
+    }
+
+    .harness-install-alert p {
+      margin-top: 2px;
+      color: #fda4af;
+      font-size: 11px;
+    }
+
     .harness-status {
       min-height: 17px;
       margin-top: 9px;
@@ -252,6 +356,30 @@
       <input id="harnessToken" type="password" autocomplete="off" spellcheck="false" placeholder="本机 Chrome 通常可留空">
     </div>
     <p class="harness-hint">默认地址为 http://127.0.0.1:3080/。测试连接会同时检查 DSH 页面和原生 bridge 的 hello.ok 握手；本机 Chrome 通常无需 token，远程或 Firefox bridge 请填入服务端 token。页面内容只通过原生 bridge 的浏览器工具按需读取。</p>
+    <div class="harness-install-card">
+      <div class="harness-install-title">
+        <span class="harness-install-badge">首次使用</span>
+        <strong>先安装 DSH 浏览器 bridge</strong>
+      </div>
+      <p>仅打开 DSH 页面还不够；bridge 负责让 DSH 通过本扩展读取和操作当前 Chrome 标签页。</p>
+      <ol class="harness-install-steps">
+        <li>先启动一次 DeepSeek Harness。</li>
+        <li>在扩展项目目录执行下面命令：</li>
+      </ol>
+      <div class="harness-command">
+        <code id="harnessInstallCommand">./scripts/install-dsh-bridge.sh</code>
+        <button class="btn-copy-command" id="copyHarnessInstallCommand" type="button">复制命令</button>
+      </div>
+      <p>安装完成后重启 DSH，再点击“测试连接”；看到“hello.ok 握手成功”才表示网页代理可用。</p>
+      <a class="harness-doc-link" href="https://github.com/misswell/deepseek-sidebar#安装" target="_blank" rel="noreferrer">打开完整安装说明 ↗</a>
+    </div>
+    <div class="harness-install-alert" id="harnessInstallAlert" hidden>
+      <span aria-hidden="true">⚠️</span>
+      <div>
+        <strong>还没有连接 DSH 浏览器 bridge</strong>
+        <p id="harnessInstallAlertDetail">DSH 页面正常，但没有收到 bridge 的 hello.ok。请按上方步骤安装并重启 DSH。</p>
+      </div>
+    </div>
     <div class="harness-status" id="harnessStatus"></div>
   </section>
   <div class="app-list" id="appList"></div>

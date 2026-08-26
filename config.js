@@ -25,6 +25,10 @@ const harnessUrlInput = document.getElementById('harnessUrl');
 const harnessTokenInput = document.getElementById('harnessToken');
 const testHarnessBtn = document.getElementById('testHarnessBtn');
 const harnessStatusEl = document.getElementById('harnessStatus');
+const copyHarnessInstallCommandBtn = document.getElementById('copyHarnessInstallCommand');
+const harnessInstallAlertEl = document.getElementById('harnessInstallAlert');
+const harnessInstallAlertDetailEl = document.getElementById('harnessInstallAlertDetail');
+const HARNESS_INSTALL_COMMAND = './scripts/install-dsh-bridge.sh';
 
 let currentVisibility = {};
 let currentOrder = [];   // array of app ids
@@ -259,16 +263,43 @@ function settledError(result) {
   return reason && reason.message ? reason.message : String(reason || '未知错误');
 }
 
+function showHarnessInstallAlert(detail) {
+  harnessInstallAlertDetailEl.textContent = detail ||
+    'DSH 页面正常，但没有收到 bridge 的 hello.ok。请按上方步骤安装并重启 DSH。';
+  harnessInstallAlertEl.hidden = false;
+}
+
+function hideHarnessInstallAlert() {
+  harnessInstallAlertEl.hidden = true;
+}
+
+async function copyHarnessInstallCommand() {
+  try {
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+      throw new Error('当前环境不支持剪贴板');
+    }
+    await navigator.clipboard.writeText(HARNESS_INSTALL_COMMAND);
+    const original = copyHarnessInstallCommandBtn.textContent;
+    copyHarnessInstallCommandBtn.textContent = '已复制';
+    setTimeout(() => { copyHarnessInstallCommandBtn.textContent = original; }, 1500);
+  } catch (error) {
+    harnessStatusEl.textContent = '请手动复制命令：' + HARNESS_INSTALL_COMMAND;
+    harnessStatusEl.classList.add('error');
+  }
+}
+
 async function testHarnessConnection() {
   let url;
   try {
     url = DeepSeekHarnessProtocol.normalizeHarnessUrl(harnessUrlInput.value);
   } catch (e) {
+    hideHarnessInstallAlert();
     harnessStatusEl.textContent = e.message;
     harnessStatusEl.classList.add('error');
     return;
   }
   testHarnessBtn.disabled = true;
+  hideHarnessInstallAlert();
   harnessStatusEl.classList.remove('error');
   harnessStatusEl.textContent = '正在连接…';
   try {
@@ -287,6 +318,10 @@ async function testHarnessConnection() {
       (info ? 'Harness 返回了异常状态（HTTP ' + (info.status || '未知') + '）' : '无法访问 Harness 页面');
     const bridgeError = settledError(bridgeResult) ||
       (bridge && bridge.error ? bridge.error : '未收到 hello.ok 握手响应');
+    const bridgeNeedsInstall = !bridgeOk && (
+      (bridge && bridge.discovered === false) ||
+      bridgeError.includes('未发现 /ext/bridge-config')
+    );
 
     harnessUrlInput.value = url;
     if (infoOk && bridgeOk) {
@@ -296,11 +331,19 @@ async function testHarnessConnection() {
     } else if (infoOk && !bridgeOk) {
       const discoveryHint = bridge && bridge.discovered === false
         ? '未发现 /ext/bridge-config；' : '';
+      const nextStep = bridgeNeedsInstall
+        ? '请安装并启动 dsh-browser bridge，再重试。'
+        : '请检查 bridge token 和服务状态，再重试。';
       harnessStatusEl.textContent = 'DSH 页面正常' +
         (info.title ? ' · ' + info.title : '') +
         '，但浏览器 bridge 未连接（' + discoveryHint + bridgeError +
-        '）。请安装并启动 dsh-browser bridge，再重试。';
+        '）。' + nextStep;
       harnessStatusEl.classList.add('error');
+      if (bridgeNeedsInstall) {
+        showHarnessInstallAlert(
+          'DSH 页面已打开，但没有收到 bridge 的 hello.ok（' + bridgeError + '）。请按上方步骤安装并重启 DSH。'
+        );
+      }
     } else if (!infoOk && bridgeOk) {
       harnessStatusEl.textContent = '原生 bridge 握手成功，但 DSH 页面检查失败：' + infoError;
       harnessStatusEl.classList.add('error');
@@ -319,5 +362,6 @@ async function testHarnessConnection() {
 saveBtn.addEventListener('click', saveSettings);
 resetBtn.addEventListener('click', resetSettings);
 testHarnessBtn.addEventListener('click', testHarnessConnection);
+copyHarnessInstallCommandBtn.addEventListener('click', () => { void copyHarnessInstallCommand(); });
 
 loadSettings();

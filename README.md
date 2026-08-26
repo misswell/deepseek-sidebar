@@ -31,6 +31,11 @@
 - DSH 页面正常但浏览器 bridge 未安装/未启动时，明确显示分层错误原因
 - 增加 `scripts/install-dsh-bridge.sh`，一键构建并注册官方 `@yuxianglin/dsh-bridge-browser`
 
+## 1.9.9
+
+- 配置页增加首次使用安装说明、bridge 安装命令复制按钮和完整文档链接
+- 检测到 DSH 页面正常但浏览器 bridge 未安装/未启动时，显示醒目的安装提示
+
 ## 1.9.7
 
 - 侧栏默认显示真实的本地 DeepSeek Harness 页面，不再显示扩展自定义任务面板

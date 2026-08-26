@@ -330,6 +330,20 @@ test('settings health check separates the Harness page from the authenticated br
   assert.match(background, /DeepSeekHarnessBridgeClient\.probe/);
 });
 
+test('settings page explains and highlights a missing DSH browser bridge', () => {
+  const html = fs.readFileSync(path.join(ROOT_DIR, 'config.html'), 'utf8');
+  const config = fs.readFileSync(path.join(ROOT_DIR, 'config.js'), 'utf8');
+  assert.match(html, /先安装 DSH 浏览器 bridge/);
+  assert.match(html, /scripts\/install-dsh-bridge\.sh/);
+  assert.match(html, /id="harnessInstallAlert"/);
+  assert.match(html, /hello\.ok 握手成功/);
+  assert.match(config, /infoOk && !bridgeOk/);
+  assert.match(config, /bridgeNeedsInstall/);
+  assert.match(config, /检查 bridge token 和服务状态/);
+  assert.match(config, /showHarnessInstallAlert/);
+  assert.match(config, /HARNESS_INSTALL_COMMAND/);
+});
+
 test('loads a page bridge instead of input-filling content scripts', () => {
   assert.ok(manifest.permissions.includes('debugger'));
   const scripts = manifest.content_scripts.flatMap(item => item.js || []);
