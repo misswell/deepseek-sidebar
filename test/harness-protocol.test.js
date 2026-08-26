@@ -17,6 +17,7 @@ test('grants the browser operator required access to ordinary web pages', () => 
 });
 
 test('normalizes Harness URLs without changing the host or port', () => {
+  assert.equal(protocol.DEFAULT_HARNESS_URL, 'http://127.0.0.1:3080');
   assert.equal(protocol.normalizeHarnessUrl('http://127.0.0.1:3080/'), 'http://127.0.0.1:3080');
   assert.equal(protocol.normalizeHarnessUrl('https://example.test/harness///'), 'https://example.test/harness');
   assert.throws(() => protocol.normalizeHarnessUrl('javascript:alert(1)'), /http 或 https/);
@@ -293,10 +294,13 @@ test('loads a page bridge instead of input-filling content scripts', () => {
 
 test('uses the real local Harness page while keeping browser tools outside the input path', () => {
   const sidepanel = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8');
+  const sidepanelScript = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.js'), 'utf8');
   assert.match(sidepanel, /harness-page-frame/);
-  assert.match(sidepanel, /harness-bridge-status/);
-  assert.match(sidepanel, /browser_\* 工具/);
-  assert.match(sidepanel, /不会被塞进 DeepSeek 网页输入框/);
+  assert.doesNotMatch(sidepanel, /id="harness-panel"/);
+  assert.doesNotMatch(sidepanel, /id="harness-task"/);
+  assert.doesNotMatch(sidepanel, /harness-client\.js/);
+  assert.doesNotMatch(sidepanelScript, /buildBrowserTaskPrompt/);
+  assert.doesNotMatch(sidepanelScript, /DeepSeekHarnessClient/);
 });
 
 test('routes the side panel state by browser tab like the Codex side panel', () => {
@@ -326,6 +330,7 @@ test('opens the real local Harness conversation page and restores its route per 
   assert.match(sidepanel, /frame\.src = frameUrl/);
   assert.match(sidepanel, /deepseek-sidebar-frame-route/);
   assert.match(sidepanel, /FRAME_ROUTE_INIT_SOURCE/);
+  assert.doesNotMatch(sidepanel, /runHarnessTask/);
   assert.match(html, /harness-page-frame/);
 });
 

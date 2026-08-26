@@ -12,7 +12,7 @@
 - **真实 DeepSeek Harness 对话页** — 默认在侧边栏打开 `http://127.0.0.1:3080/`，也可以设置自己的 Harness 地址；通过 WebSocket bridge 让本地页面直接调用当前页面的 `browser_*` 工具
 - **页面与 DevTools 分离** — 扩展在当前标签页读取和执行页面动作；需要时还可把 Chrome DevTools Protocol 调用交给 `chrome.debugger`，不依赖 AI 网站输入框
 - **本地连接测试** — 在设置页验证 Harness API、原生 bridge 和可选 token；网页内容只在 Harness 请求浏览器工具时发送
-- **按页面隔离侧栏** — 仿照 Codex 扩展，按 Chrome `tabId` 保存每个页面的应用、会话、任务输入、日志、阅读器和缩放状态；切换标签页时恢复各自的右侧窗口
+- **按页面隔离侧栏** — 仿照 Codex 扩展，按 Chrome `tabId` 保存每个页面的应用、Harness 对话路由、阅读器和缩放状态；切换标签页时恢复各自的右侧窗口
 - **自由缩放** — 工具栏按钮或 Ctrl/Cmd +/-/0 快捷键，30%-200% 范围调节
 - **双击重置缩放** — 双击缩放百分比标签一键恢复 100%
 - **记忆缩放** — 自动保存缩放比例，下次打开立即恢复
@@ -80,7 +80,7 @@
 6. 打开扩展设置，在「DeepSeek Harness 网页代理」中填写服务地址（默认 `http://127.0.0.1:3080/`）和可选 token，然后测试连接
 7. 在侧边栏打开 Harness 图标，直接使用本地 DeepSeek 对话页面发起任务；页面内容由扩展自己的 browser 工具读取，不会写入 DeepSeek/ChatGPT 等网站的输入框
 
-如果当前 Harness 只有 `/api` 而没有 `/ext/bridge-config`，扩展会显示兼容模式。要使用原生网页工具，请重启并安装带 bridge 插件的 Harness；Chrome 本机连接通常无需 token，远程地址请填写服务端 token。
+如果未发现 `/ext/bridge-config`，真实 Harness 页面仍会打开，但扩展无法启用原生网页工具；请安装带 bridge 插件的 Harness。Chrome 本机连接通常无需 token，远程地址请填写服务端 token。
 
 ## 文件结构
 
@@ -92,6 +92,7 @@
 ├── harness-bridge-client.js # 原生 WebSocket bridge、握手、重连和工具回传
 ├── harness-extension-transport.js # 通过 Harness 同源宿主页转发扩展 RPC
 ├── harness-host-bridge.js  # 在 Harness 同源页面内转发 API 请求，避免放宽服务端 CORS
+├── frame-route-bridge.js   # 在 Harness iframe 握手后记录 SPA 对话路由
 ├── page-bridge.js          # 注入当前网页的文本快照与动作执行桥
 ├── sidepanel.html          # 侧边栏页面（工具栏 + AI iframe + 本地 Harness 页面）
 ├── sidepanel.js            # 按标签页隔离的 iframe 路由、缩放、应用切换和页面工具逻辑
@@ -123,7 +124,7 @@
 
 ## 隐私
 
-本扩展不收集或上传用户数据到扩展作者的服务器。原生模式下，用户任务发送到配置的 Harness，Harness 通过 bridge 请求扩展读取当前页面或执行动作；页面文本不会经过第三方 AI 网站的输入框。兼容模式下，页面快照会作为 Harness API 请求的一部分发送到用户配置的地址。详见 [隐私政策](https://misswell.github.io/deepseek-sidebar/privacy-policy.html)。
+本扩展不收集或上传用户数据到扩展作者的服务器。侧栏直接显示配置的 Harness 页面；Harness 通过 bridge 请求扩展读取当前页面或执行动作，页面文本不会经过第三方 AI 网站的输入框。详见 [隐私政策](https://misswell.github.io/deepseek-sidebar/privacy-policy.html)。
 
 ## License
 

@@ -13,21 +13,6 @@ const pageReaderStatus = document.getElementById('page-reader-status');
 const togglePageReaderBtn = document.getElementById('toggle-page-reader');
 const copyPageContentBtn = document.getElementById('copy-page-content');
 const closePageReaderBtn = document.getElementById('close-page-reader');
-const harnessBridgeStatus = document.getElementById('harness-bridge-status');
-const harnessPanel = document.getElementById('harness-panel');
-const harnessState = document.getElementById('harness-state');
-const harnessStateLabel = document.getElementById('harness-state-label');
-const harnessEndpoint = document.getElementById('harness-endpoint');
-const harnessOpenBtn = document.getElementById('harness-open');
-const harnessRefreshSnapshotBtn = document.getElementById('harness-refresh-snapshot');
-const harnessPageTitle = document.getElementById('harness-page-title');
-const harnessPageUrl = document.getElementById('harness-page-url');
-const harnessSnapshotMeta = document.getElementById('harness-snapshot-meta');
-const harnessTask = document.getElementById('harness-task');
-const harnessAutoRun = document.getElementById('harness-auto-run');
-const harnessRunBtn = document.getElementById('harness-run');
-const harnessStatus = document.getElementById('harness-status');
-const harnessLogList = document.getElementById('harness-log-list');
 
 const ZOOM_KEY = 'deepseek-sidebar-zoom';
 const APP_KEY = 'deepseek-sidebar-app';
@@ -84,18 +69,15 @@ let currentWindowId = null;
 let currentPageText = '';
 let currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
 let currentHarnessToken = '';
-let currentHarnessSessionId = '';
-let currentHarnessSnapshot = null;
-let harnessRunning = false;
-let harnessAbortController = null;
 let nativeHarnessBridge = { state: 'stopped', connected: false, caps: null, error: '' };
 let harnessBridgePort = null;
 let harnessTargetBoundTabId = null;
+let harnessTargetBindingQueue = Promise.resolve();
+let harnessActivationSequence = 0;
 let pickingTabId = null;
 let pickCancelled = false;
 let pickWaitResolver = null;
 let pickPendingNavigation = false;
-let harnessRunningTabId = null;
 let tabPanelStates = new Map();
 let persistedTabStates = {};
 let tabStateStorageWrite = Promise.resolve();
@@ -135,12 +117,7 @@ function createPanelState(tabId, stableState) {
       title: '当前页面内容',
       meta: '',
       status: ''
-    },
-    harnessSnapshot: null,
-    harnessTask: '',
-    harnessAutoRun: true,
-    harnessLog: [],
-    harnessStatus: { message: '', kind: '' }
+    }
   };
 }
 
@@ -283,42 +260,11 @@ async function loadPanelStateStore(initialTabId) {
   });
 }
 
-function readHarnessLogEntries() {
-  return Array.from(harnessLogList.children)
-    .map(item => ({
-      message: item.textContent || '',
-      kind: item.classList.contains('error') ? 'error'
-        : item.classList.contains('action') ? 'action'
-          : item.classList.contains('result') ? 'result' : ''
-    }))
-    .filter(item => item.message && !item.message.startsWith('输入任务后'));
-}
-
-function renderHarnessLogEntries(entries) {
-  harnessLogList.innerHTML = '';
-  const values = Array.isArray(entries) ? entries.filter(item => item && item.message) : [];
-  if (!values.length) {
-    const placeholder = document.createElement('div');
-    placeholder.className = 'harness-log-item';
-    placeholder.textContent = '输入任务后，Harness 会通过 browser_* 工具按需读取并操作当前页面。';
-    harnessLogList.appendChild(placeholder);
-    return;
-  }
-  values.slice(-24).forEach(item => {
-    const element = document.createElement('div');
-    element.className = 'harness-log-item' + (item.kind ? ' ' + item.kind : '');
-    element.textContent = item.message;
-    harnessLogList.appendChild(element);
-  });
-  harnessLogList.lastElementChild && harnessLogList.lastElementChild.scrollIntoView({ block: 'nearest' });
-}
-
 function captureCurrentPanelState() {
   const state = getPanelState(currentTabId);
   if (!state) return;
   if (currentApp) state.app = currentApp;
   state.zoom = currentZoom;
-  state.harnessSessionId = currentHarnessSessionId || '';
   state.pageText = currentPageText || '';
   state.pageReader = {
     hidden: pageReader.classList.contains('hidden'),
@@ -326,15 +272,6 @@ function captureCurrentPanelState() {
     title: pageReaderTitle.textContent || '当前页面内容',
     meta: pageReaderMeta.textContent || '',
     status: pageReaderStatus.textContent || ''
-  };
-  state.harnessSnapshot = currentHarnessSnapshot || null;
-  state.harnessTask = harnessTask.value || '';
-  state.harnessAutoRun = Boolean(harnessAutoRun.checked);
-  state.harnessLog = readHarnessLogEntries();
-  state.harnessStatus = {
-    message: harnessStatus.textContent || '',
-    kind: harnessStatus.classList.contains('error') ? 'error'
-      : harnessStatus.classList.contains('success') ? 'success' : ''
   };
 }
 
@@ -344,19 +281,12 @@ function restorePanelState(tabId) {
   currentApp = state.app;
   currentZoom = state.zoom;
   currentPageText = state.pageText || '';
-  currentHarnessSessionId = state.harnessSessionId || '';
-  currentHarnessSnapshot = state.harnessSnapshot || null;
-  harnessTask.value = state.harnessTask || '';
-  harnessAutoRun.checked = state.harnessAutoRun !== false;
   pageReaderTitle.textContent = state.pageReader.title || '当前页面内容';
   pageReaderMeta.textContent = state.pageReader.meta || '';
   pageReaderContent.value = currentPageText;
   pageReaderStatus.textContent = state.pageReader.status || '';
   pageReader.classList.toggle('hidden', state.pageReader.hidden !== false);
   setPageReaderExpanded(state.pageReader.expanded === true);
-  renderHarnessLogEntries(state.harnessLog);
-  updateHarnessSnapshotCard(currentHarnessSnapshot, tabId);
-  setHarnessStatus(state.harnessStatus.message, state.harnessStatus.kind, tabId);
   zoomLabel.textContent = currentZoom + '%';
 }
 
@@ -419,10 +349,23 @@ function isHarnessFrameUrl(url) {
   }
 }
 
+function isAppFrameUrl(appId, url) {
+  if (appId === 'harness') return isHarnessFrameUrl(url);
+  const app = APPS[appId];
+  if (!app || !app.url) return false;
+  try {
+    const base = new URL(app.url);
+    const candidate = new URL(url);
+    return candidate.origin === base.origin;
+  } catch (error) {
+    return false;
+  }
+}
+
 function frameUrlForApp(appId, tabId) {
   const state = getPanelState(tabId);
   const savedUrl = state && state.frameUrls ? state.frameUrls[appId] : '';
-  if (savedUrl && (appId !== 'harness' || isHarnessFrameUrl(savedUrl))) return savedUrl;
+  if (savedUrl && isAppFrameUrl(appId, savedUrl)) return savedUrl;
   if (appId === 'harness') return currentHarnessUrl;
   return APPS[appId] && APPS[appId].url ? APPS[appId].url : '';
 }
@@ -431,7 +374,7 @@ function persistFrameRoute(tabId, appId, url, frame) {
   const targetTabId = numericTabId(tabId);
   const state = getPanelState(targetTabId);
   const normalizedUrl = DeepSeekSidebarTabState.normalizeFrameUrl(url);
-  if (!state || !normalizedUrl || (appId === 'harness' && !isHarnessFrameUrl(normalizedUrl))) return;
+  if (!state || !normalizedUrl || !isAppFrameUrl(appId, normalizedUrl)) return;
   if (state.frameUrls[appId] === normalizedUrl) return;
   state.frameUrls[appId] = normalizedUrl;
   if (frame) frame.dataset.currentUrl = normalizedUrl;
@@ -469,10 +412,6 @@ function activateTab(tabId, windowId) {
     void executeElementPickCancel(pickingTabId);
     if (pickWaitResolver) pickWaitResolver('cancelled');
   }
-  if (harnessRunning && harnessRunningTabId !== null && harnessRunningTabId !== id) {
-    harnessAbortController && harnessAbortController.abort();
-  }
-
   captureCurrentPanelState();
   if (currentTabId !== null) persistPanelState(currentTabId);
   currentTabId = id;
@@ -493,7 +432,6 @@ function forgetTabState(tabId) {
   persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, id);
   removeTabFrames(id);
   queueTabStateStorageWrite();
-  if (harnessRunningTabId === id && harnessAbortController) harnessAbortController.abort();
 }
 
 function bindTabLifecycleListeners() {
@@ -538,7 +476,7 @@ function bindTabLifecycleListeners() {
     if (oldId === null || newId === null) return;
     const wasCurrent = currentTabId === oldId;
     if (wasCurrent) captureCurrentPanelState();
-    if (harnessTargetBoundTabId === oldId) harnessTargetBoundTabId = null;
+    if (harnessTargetBoundTabId === oldId) void unbindHarnessTarget();
     if (tabPanelStates.has(oldId) && !tabPanelStates.has(newId)) {
       tabPanelStates.set(newId, tabPanelStates.get(oldId));
       tabPanelStates.get(newId).tabId = newId;
@@ -665,7 +603,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
     } catch (e) {
       currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
     }
-    updateHarnessEndpoint();
     if (currentHarnessUrl !== previousHarnessUrl) {
       resetAppFrames('harness');
       if (currentApp === 'harness') renderCurrentApp();
@@ -674,7 +611,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes[HARNESS_TOKEN_KEY]) {
     currentHarnessToken = typeof changes[HARNESS_TOKEN_KEY].newValue === 'string'
       ? changes[HARNESS_TOKEN_KEY].newValue : '';
-    if (currentApp === 'harness') activateHarnessPanel(currentTabId);
+    if (currentApp === 'harness') activateHarnessBridge(currentTabId);
   }
 });
 
@@ -735,67 +672,73 @@ function getOrCreateFrame(appId, tabId) {
   return frame;
 }
 
-function setHarnessBridgeStatus(message, state) {
-  if (!message) {
-    harnessBridgeStatus.textContent = '';
-    harnessBridgeStatus.classList.remove('visible', 'error', 'working', 'done');
-    return;
-  }
-  harnessBridgeStatus.textContent = message;
-  harnessBridgeStatus.classList.remove('error', 'working', 'done');
-  if (state) harnessBridgeStatus.classList.add(state);
-  harnessBridgeStatus.classList.add('visible');
-  if (state === 'ready' || state === 'done') {
-    setTimeout(() => {
-      if (harnessBridgeStatus.textContent === message) {
-        harnessBridgeStatus.classList.remove('visible');
-      }
-    }, 2600);
-  }
+function queueHarnessTargetOperation(operation) {
+  const next = harnessTargetBindingQueue.catch(() => {}).then(operation);
+  harnessTargetBindingQueue = next.catch(() => {});
+  return next;
 }
 
-async function bindHarnessTargetForTab(tabId) {
+function bindHarnessTargetForTab(tabId) {
   const targetTabId = numericTabId(tabId);
-  if (targetTabId === null || !nativeHarnessBridge.connected) return false;
-  const tab = await queryTabById(targetTabId);
-  if (unsupportedAutomationUrl(tab.url)) {
-    throw new Error('当前标签页不是可操作的普通网页');
-  }
-  if (!(await ensureAutomationPermission(tab))) {
-    throw new Error('需要允许扩展访问当前网页，才能让 Harness 操作它。');
-  }
-  if (harnessTargetBoundTabId === targetTabId) return true;
-  if (harnessTargetBoundTabId !== null) {
-    try { await sendHarnessBridgeCommand('unbind'); } catch (error) {}
-    harnessTargetBoundTabId = null;
-  }
-  await sendHarnessBridgeCommand('bind', { tabId: targetTabId });
-  harnessTargetBoundTabId = targetTabId;
-  return true;
+  if (targetTabId === null) return Promise.resolve(false);
+  return queueHarnessTargetOperation(async () => {
+    if (!nativeHarnessBridge.connected || !isCurrentPanelTab(targetTabId) || currentApp !== 'harness') {
+      return false;
+    }
+    const tab = await queryTabById(targetTabId);
+    if (unsupportedAutomationUrl(tab.url)) {
+      throw new Error('当前标签页不是可操作的普通网页');
+    }
+    if (!(await ensureAutomationPermission(tab))) {
+      throw new Error('需要允许扩展访问当前网页，才能让 Harness 操作它。');
+    }
+    if (!nativeHarnessBridge.connected || !isCurrentPanelTab(targetTabId) || currentApp !== 'harness') {
+      return false;
+    }
+    if (harnessTargetBoundTabId === targetTabId) return true;
+    if (harnessTargetBoundTabId !== null) {
+      try { await sendHarnessBridgeCommand('unbind'); } catch (error) {}
+      harnessTargetBoundTabId = null;
+    }
+    if (!nativeHarnessBridge.connected || !isCurrentPanelTab(targetTabId) || currentApp !== 'harness') {
+      return false;
+    }
+    await sendHarnessBridgeCommand('bind', { tabId: targetTabId });
+    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') {
+      try { await sendHarnessBridgeCommand('unbind'); } catch (error) {}
+      harnessTargetBoundTabId = null;
+      return false;
+    }
+    harnessTargetBoundTabId = targetTabId;
+    return true;
+  });
 }
 
 function unbindHarnessTarget() {
-  if (harnessTargetBoundTabId === null) return;
+  const hadBoundTarget = harnessTargetBoundTabId !== null;
   harnessTargetBoundTabId = null;
-  void sendHarnessBridgeCommand('unbind').catch(() => {});
+  return queueHarnessTargetOperation(async () => {
+    if (!hadBoundTarget && !nativeHarnessBridge.connected) return false;
+    try { await sendHarnessBridgeCommand('unbind'); } catch (error) {}
+    return true;
+  });
 }
 
-async function activateHarnessPanel(tabId) {
+async function activateHarnessBridge(tabId) {
   const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
   if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
-  setHarnessBridgeStatus('正在连接原生浏览器工具…', 'working');
+  const activation = ++harnessActivationSequence;
+  const isActive = () => activation === harnessActivationSequence &&
+    isCurrentPanelTab(targetTabId) && currentApp === 'harness';
   try {
     const started = await sendHarnessBridgeCommand('start', {
       baseUrl: currentHarnessUrl,
       token: currentHarnessToken
     });
-    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
+    if (!isActive()) return;
     applyHarnessBridgeStatus(started);
     const connected = await waitForNativeHarnessBridge(1800);
-    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
-    // Do not leave a reconnect loop running when this is an older Harness
-    // instance without the browser bridge. The HTTP compatibility path below
-    // remains available and the next refresh can try native mode again.
+    if (!isActive()) return;
     if (!connected) {
       try {
         const stopped = await sendHarnessBridgeCommand('stop');
@@ -804,16 +747,13 @@ async function activateHarnessPanel(tabId) {
       return;
     }
     await bindHarnessTargetForTab(targetTabId);
-    if (isCurrentPanelTab(targetTabId) && currentApp === 'harness') {
-      setHarnessBridgeStatus('本地 DeepSeek 页面已连接当前标签页', 'done');
-    }
   } catch (error) {
-    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
+    if (!isActive()) return;
     try {
       const stopped = await sendHarnessBridgeCommand('stop');
       applyHarnessBridgeStatus(stopped);
     } catch (stopError) {}
-    setHarnessBridgeStatus(error && error.message ? error.message : 'Harness bridge 未启用', 'error');
+    void error;
   }
 }
 
@@ -842,17 +782,12 @@ function renderCurrentApp() {
   appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === currentApp));
   hideAllFrames();
   if (currentApp === 'harness') {
-    harnessPanel.classList.add('hidden');
-    updateHarnessEndpoint();
     renderFrameApp(currentApp, currentTabId);
-    harnessRunBtn.textContent = harnessRunningTabId === currentTabId ? '停止任务' : '运行任务';
-    harnessRunBtn.disabled = harnessRunning && harnessRunningTabId !== currentTabId;
-    harnessRefreshSnapshotBtn.disabled = harnessRunning;
-    if (!harnessRunning) activateHarnessPanel(currentTabId);
+    activateHarnessBridge(currentTabId);
     return;
   }
-  harnessPanel.classList.add('hidden');
-  unbindHarnessTarget();
+  harnessActivationSequence += 1;
+  void unbindHarnessTarget();
   renderFrameApp(currentApp, currentTabId);
 }
 
@@ -881,38 +816,17 @@ function applyZoom(zoom) {
   zoomLabel.textContent = currentZoom + '%';
 }
 
-function updateHarnessEndpoint() {
-  harnessEndpoint.textContent = currentHarnessUrl;
-}
-
-function setHarnessConnectionState(state, label) {
-  harnessState.classList.remove('connected', 'error');
-  if (state === 'connected' || state === 'error') harnessState.classList.add(state);
-  harnessStateLabel.textContent = label;
-}
-
 function applyHarnessBridgeStatus(status) {
   if (!status || status.source !== HARNESS_BRIDGE_SOURCE) return;
   nativeHarnessBridge = {
     state: status.state || 'stopped',
     connected: status.connected === true,
     caps: status.caps || null,
-    error: status.error || ''
+    error: status.error || '',
+    targetTabId: numericTabId(status.targetTabId)
   };
-  if (!nativeHarnessBridge.connected && nativeHarnessBridge.state === 'stopped') {
-    harnessTargetBoundTabId = null;
-  }
-  if (nativeHarnessBridge.connected) {
-    setHarnessConnectionState('connected', '原生网页工具已连接');
-    setHarnessBridgeStatus('原生网页工具已就绪，模型会直接调用当前页面', 'done');
-  } else if (nativeHarnessBridge.state === 'connecting' || nativeHarnessBridge.state === 'reconnecting') {
-    setHarnessConnectionState('connecting', '正在连接网页工具…');
-    setHarnessBridgeStatus(nativeHarnessBridge.error || '正在连接 Harness 浏览器 bridge…', 'working');
-  } else if (nativeHarnessBridge.state === 'stopped' && nativeHarnessBridge.error) {
-    setHarnessConnectionState('error', '网页工具未连接');
-    setHarnessBridgeStatus(nativeHarnessBridge.error, 'error');
-  } else if (nativeHarnessBridge.state === 'stopped') {
-    setHarnessConnectionState('connecting', '等待原生网页工具');
+  if (Object.prototype.hasOwnProperty.call(status, 'targetTabId')) {
+    harnessTargetBoundTabId = nativeHarnessBridge.targetTabId;
   }
 }
 
@@ -942,61 +856,6 @@ function sendHarnessBridgeCommand(command, payload) {
   });
 }
 
-function sendNativeHarnessRpc(request) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let removeAbort = null;
-    const finish = (callback, value) => {
-      if (settled) return;
-      settled = true;
-      if (removeAbort) removeAbort();
-      callback(value);
-    };
-    const onAbort = () => {
-      const error = new Error('任务已停止');
-      error.name = 'AbortError';
-      finish(reject, error);
-    };
-    if (request.signal) {
-      if (request.signal.aborted) {
-        onAbort();
-        return;
-      }
-      request.signal.addEventListener('abort', onAbort, { once: true });
-      removeAbort = () => request.signal.removeEventListener('abort', onAbort);
-    }
-    try {
-      chrome.runtime.sendMessage({
-        source: HARNESS_BRIDGE_SOURCE,
-        command: 'rpc',
-        method: request.method,
-        payload: request.payload,
-        timeoutMs: request.timeoutMs
-      }, response => {
-        const error = chrome.runtime.lastError;
-        if (error) {
-          finish(reject, new Error(error.message));
-          return;
-        }
-        if (!response || response.ok !== true) {
-          finish(reject, new Error(response && response.error ? response.error : 'Harness bridge RPC 失败'));
-          return;
-        }
-        finish(resolve, response.value);
-      });
-    } catch (error) {
-      finish(reject, error);
-    }
-  });
-}
-
-function createNativeHarnessClient(options) {
-  return new DeepSeekHarnessClient(currentHarnessUrl, {
-    ...(options || {}),
-    transport: sendNativeHarnessRpc
-  });
-}
-
 async function waitForNativeHarnessBridge(timeoutMs) {
   const deadline = Date.now() + (timeoutMs || 1800);
   while (Date.now() < deadline) {
@@ -1021,28 +880,6 @@ function connectHarnessBridgePort() {
 }
 
 connectHarnessBridgePort();
-
-function setHarnessStatus(message, kind, tabId) {
-  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
-  const state = getPanelState(targetTabId);
-  if (state) state.harnessStatus = { message: message || '', kind: kind || '' };
-  if (!isCurrentPanelTab(targetTabId)) return;
-  harnessStatus.textContent = message || '';
-  harnessStatus.classList.remove('error', 'success');
-  if (kind) harnessStatus.classList.add(kind);
-}
-
-function appendHarnessLog(message, kind, tabId) {
-  if (!message) return;
-  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
-  const state = getPanelState(targetTabId);
-  if (!state) return;
-  state.harnessLog = [...(Array.isArray(state.harnessLog) ? state.harnessLog : []), {
-    message: String(message),
-    kind: kind || ''
-  }].slice(-24);
-  if (isCurrentPanelTab(targetTabId)) renderHarnessLogEntries(state.harnessLog);
-}
 
 function permissionContains(origins) {
   return new Promise(resolve => {
@@ -1088,365 +925,6 @@ async function ensureAutomationPermission(tab) {
   }
   if (await permissionContains([origin])) return true;
   return await requestOriginPermission(origin);
-}
-
-function sendHarnessPageCommand(tabId, command, action) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({
-      source: 'deepseek-sidebar-harness',
-      tabId,
-      command,
-      action
-    }, response => {
-      const error = chrome.runtime.lastError;
-      if (error) {
-        reject(new Error(error.message));
-        return;
-      }
-      if (!response || response.ok !== true) {
-        reject(new Error(response && response.error ? response.error : '浏览器没有返回结果'));
-        return;
-      }
-      resolve(response.value);
-    });
-  });
-}
-
-function createHarnessClient(options) {
-  return new DeepSeekHarnessClient(currentHarnessUrl, {
-    ...(options || {}),
-    transport: DeepSeekHarnessTransport.request
-  });
-}
-
-async function ensureHarnessServerPermission() {
-  const origin = DeepSeekHarnessProtocol.harnessOriginPattern(currentHarnessUrl);
-  if (await permissionContains([origin])) return true;
-  return await requestOriginPermission(origin);
-}
-
-function updateHarnessSnapshotCard(snapshot, tabId) {
-  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
-  const state = getPanelState(targetTabId);
-  if (state) state.harnessSnapshot = snapshot || null;
-  if (!isCurrentPanelTab(targetTabId)) return;
-  currentHarnessSnapshot = snapshot || null;
-  harnessPageTitle.textContent = snapshot && snapshot.title ? snapshot.title : '未命名页面';
-  harnessPageUrl.textContent = snapshot && snapshot.url ? snapshot.url : '';
-  const interactiveCount = snapshot && Array.isArray(snapshot.interactive) ? snapshot.interactive.length : 0;
-  const textLength = snapshot && snapshot.text ? snapshot.text.length : 0;
-  harnessSnapshotMeta.textContent = snapshot
-    ? interactiveCount + ' 个可交互元素 · ' + textLength + ' 字符可见内容'
-    : '';
-}
-
-async function getHarnessPageSnapshot(tabId, signal) {
-  let lastError = null;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (signal && signal.aborted) throw new Error('任务已停止');
-    try {
-      return await sendHarnessPageCommand(tabId, 'snapshot');
-    } catch (error) {
-      lastError = error;
-      if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 650));
-    }
-  }
-  throw lastError || new Error('无法读取当前页面');
-}
-
-async function refreshHarnessConnection(silent, tabId) {
-  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
-  if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return null;
-  try {
-    const client = createHarnessClient({ timeoutMs: 6000 });
-    const info = await client.describe();
-    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return null;
-    const model = info && (info.model || info.provider);
-    setHarnessConnectionState('connected', nativeHarnessBridge.connected
-      ? '原生网页工具已连接'
-      : model ? '兼容模式 · ' + model : '兼容模式已连接');
-    if (!silent) setHarnessStatus('本地 Harness 已连接。', 'success', targetTabId);
-    return info;
-  } catch (error) {
-    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return null;
-    setHarnessConnectionState('error', '连接失败');
-    if (!silent) setHarnessStatus(error && error.message ? error.message : '无法连接 Harness', 'error', targetTabId);
-    return null;
-  }
-}
-
-async function refreshHarnessPanel(silent, tabId) {
-  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
-  if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
-  updateHarnessEndpoint();
-  if (nativeHarnessBridge.connected) {
-    try {
-      const tab = await queryTabById(targetTabId);
-      if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
-      if (unsupportedAutomationUrl(tab.url)) {
-        updateHarnessSnapshotCard(null, targetTabId);
-        harnessPageTitle.textContent = '此页面不允许扩展读取';
-        harnessSnapshotMeta.textContent = '请切换到普通 http/https 网页';
-        if (!silent) setHarnessStatus('当前 Chrome 系统页面不能被网页代理访问。', 'error', targetTabId);
-        return;
-      }
-      if (!(await ensureAutomationPermission(tab))) {
-        updateHarnessSnapshotCard(null, targetTabId);
-        harnessPageTitle.textContent = '等待网页访问权限';
-        harnessSnapshotMeta.textContent = '运行任务时可以再次授权';
-        return;
-      }
-      const snapshot = await getHarnessPageSnapshot(tab.id);
-      if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
-      updateHarnessSnapshotCard(snapshot, targetTabId);
-      if (!silent) setHarnessStatus('原生网页工具已连接，页面快照已更新。', 'success', targetTabId);
-    } catch (error) {
-      if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
-      updateHarnessSnapshotCard(null, targetTabId);
-      harnessPageTitle.textContent = '无法读取当前页面';
-      harnessSnapshotMeta.textContent = '点击刷新或运行任务重试';
-      if (!silent) setHarnessStatus(error && error.message ? error.message : '无法读取当前页面', 'error', targetTabId);
-    }
-    return;
-  }
-  const connection = await refreshHarnessConnection(silent, targetTabId);
-  if (!connection) return;
-  try {
-    if (!(await ensureHarnessServerPermission())) {
-      throw new Error('需要允许扩展访问 Harness 服务地址。');
-    }
-    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
-    const tab = await queryTabById(targetTabId);
-    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
-    if (unsupportedAutomationUrl(tab.url)) {
-      updateHarnessSnapshotCard(null, targetTabId);
-      harnessPageTitle.textContent = '此页面不允许扩展读取';
-      harnessSnapshotMeta.textContent = '请切换到普通 http/https 网页';
-      if (!silent) setHarnessStatus('当前 Chrome 系统页面不能被网页代理访问。', 'error', targetTabId);
-      return;
-    }
-    if (!(await ensureAutomationPermission(tab))) {
-      updateHarnessSnapshotCard(null, targetTabId);
-      harnessPageTitle.textContent = '等待网页访问权限';
-      harnessSnapshotMeta.textContent = '点击“运行任务”时可以再次授权';
-      return;
-    }
-    const snapshot = await getHarnessPageSnapshot(tab.id);
-    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
-    updateHarnessSnapshotCard(snapshot, targetTabId);
-    if (!silent) setHarnessStatus('页面快照已更新。', 'success', targetTabId);
-  } catch (error) {
-    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
-    updateHarnessSnapshotCard(null, targetTabId);
-    harnessPageTitle.textContent = '无法读取当前页面';
-    harnessSnapshotMeta.textContent = '点击刷新或运行任务重试';
-    if (!silent) setHarnessStatus(error && error.message ? error.message : '无法读取当前页面', 'error', targetTabId);
-  }
-}
-
-function executeHarnessAction(tabId, action) {
-  return sendHarnessPageCommand(tabId, 'execute', action);
-}
-
-function waitForHarnessAction(action) {
-  const delay = action && action.type === 'navigate' ? 1200
-    : action && ['back', 'forward', 'reload'].includes(action.type) ? 900
-      : action && action.type === 'click' ? 450 : 180;
-  return new Promise(resolve => setTimeout(resolve, delay));
-}
-
-function stopHarnessTask() {
-  if (harnessAbortController) harnessAbortController.abort();
-  setHarnessStatus('正在停止后续动作…', '', harnessRunningTabId === null ? currentTabId : harnessRunningTabId);
-}
-
-function setHarnessSessionForTab(tabId, sessionId) {
-  const state = getPanelState(tabId);
-  if (!state) return;
-  state.harnessSessionId = typeof sessionId === 'string' ? sessionId : '';
-  if (isCurrentPanelTab(tabId)) currentHarnessSessionId = state.harnessSessionId;
-  persistPanelState(tabId);
-}
-
-async function runNativeHarnessTask(task, signal, tabId) {
-  const targetTabId = numericTabId(tabId);
-  const client = createNativeHarnessClient({
-    maxWaitMs: 90000,
-    timeoutMs: 20000
-  });
-  let sessionId = (getPanelState(targetTabId) || {}).harnessSessionId || '';
-  const cancelActiveSession = () => {
-    if (!sessionId) return;
-    void client.cancel(sessionId, { timeoutMs: 5000 }).catch(() => {});
-  };
-  signal.addEventListener('abort', cancelActiveSession, { once: true });
-  try {
-    await client.describe({ signal });
-    appendHarnessLog('原生工具模式：任务只发送给 Harness，页面由 browser_* 工具按需读取；当前标签页已固定。', 'result', targetTabId);
-    const response = await client.runPrompt(task, {
-      sessionId,
-      onSessionId: value => { sessionId = value; },
-      signal,
-      maxWaitMs: 90000
-    });
-    setHarnessSessionForTab(targetTabId, response.sessionId);
-    if (response.text) appendHarnessLog(response.text, 'result', targetTabId);
-    if (isCurrentPanelTab(targetTabId)) setHarnessConnectionState('connected', '原生网页工具已连接');
-    setHarnessStatus(response.text || '任务已完成。', 'success', targetTabId);
-  } finally {
-    signal.removeEventListener('abort', cancelActiveSession);
-  }
-}
-
-async function runHarnessTask() {
-  if (harnessRunning) {
-    if (harnessRunningTabId === currentTabId) stopHarnessTask();
-    else setHarnessStatus('另一个页面的任务正在运行，请稍候。', 'error', currentTabId);
-    return;
-  }
-  const task = harnessTask.value.trim();
-  if (!task) {
-    setHarnessStatus('先输入一个网页任务。', 'error');
-    harnessTask.focus();
-    return;
-  }
-
-  const taskTabId = numericTabId(currentTabId);
-  if (taskTabId === null) {
-    setHarnessStatus('未找到当前标签页。', 'error');
-    return;
-  }
-  harnessRunning = true;
-  harnessRunningTabId = taskTabId;
-  harnessAbortController = new AbortController();
-  const signal = harnessAbortController.signal;
-  harnessRunBtn.textContent = '停止任务';
-  harnessRunBtn.disabled = false;
-  harnessRefreshSnapshotBtn.disabled = true;
-  setHarnessStatus(nativeHarnessBridge.connected ? '正在启动原生网页工具…' : '正在读取当前页面…', '', taskTabId);
-  const taskState = getPanelState(taskTabId);
-  if (taskState) taskState.harnessLog = [];
-  renderHarnessLogEntries([]);
-  appendHarnessLog('任务：' + task, '', taskTabId);
-  let nativeTargetBound = false;
-
-  try {
-    if (!(await ensureHarnessServerPermission())) {
-      throw new Error('需要允许扩展访问 Harness 服务地址。');
-    }
-    if (signal.aborted || !isCurrentPanelTab(taskTabId)) throw new Error('任务已停止');
-    const tab = await queryTabById(taskTabId);
-    if (!(await ensureAutomationPermission(tab))) {
-      throw new Error('需要允许扩展访问当前网页，才能读取和操作它。');
-    }
-    if (signal.aborted || !isCurrentPanelTab(taskTabId)) throw new Error('任务已停止');
-    if (nativeHarnessBridge.connected) {
-      await sendHarnessBridgeCommand('bind', { tabId: tab.id });
-      nativeTargetBound = true;
-      await runNativeHarnessTask(task, signal, taskTabId);
-      return;
-    }
-    const snapshot = await getHarnessPageSnapshot(tab.id, signal);
-    updateHarnessSnapshotCard(snapshot, taskTabId);
-    if (isCurrentPanelTab(taskTabId)) setHarnessConnectionState('connected', '正在规划动作…');
-
-    const client = createHarnessClient({
-      maxWaitMs: 90000,
-      timeoutMs: 20000
-    });
-    await client.describe({ signal });
-
-    let sessionId = (getPanelState(taskTabId) || {}).harnessSessionId || '';
-    let previousResults = [];
-    let lastMessage = '';
-    let completed = false;
-
-    for (let round = 0; round < 5; round += 1) {
-      if (signal.aborted) throw new Error('任务已停止');
-      if (round > 0) {
-        const refreshed = await getHarnessPageSnapshot(tab.id, signal);
-        updateHarnessSnapshotCard(refreshed, taskTabId);
-      }
-      const prompt = DeepSeekHarnessProtocol.buildBrowserTaskPrompt({
-        task,
-        snapshot: (getPanelState(taskTabId) || {}).harnessSnapshot || snapshot,
-        continuation: round > 0,
-        previousResults
-      });
-      appendHarnessLog('第 ' + (round + 1) + ' 轮：请求 Harness 规划…', '', taskTabId);
-      const response = await client.runPrompt(prompt, { sessionId, signal, maxWaitMs: 90000 });
-      sessionId = response.sessionId;
-      setHarnessSessionForTab(taskTabId, sessionId);
-
-      const parsed = DeepSeekHarnessProtocol.parseBrowserActionResponse(response.text);
-      lastMessage = parsed.message || '';
-      if (lastMessage) appendHarnessLog(lastMessage, 'result', taskTabId);
-      if (!parsed.actions.length) {
-        completed = parsed.done;
-        if (!parsed.message) appendHarnessLog('Harness 没有返回可执行动作。', 'result', taskTabId);
-        break;
-      }
-
-      appendHarnessLog('模型提议 ' + parsed.actions.length + ' 个动作：' +
-        parsed.actions.map(DeepSeekHarnessProtocol.actionLabel).join('、'), '', taskTabId);
-      if (!harnessAutoRun.checked) {
-        appendHarnessLog(JSON.stringify(parsed.actions, null, 2), 'result', taskTabId);
-        setHarnessStatus('动作已生成，但“自动执行模型动作”处于关闭状态。', '', taskTabId);
-        break;
-      }
-
-      previousResults = [];
-      for (const action of parsed.actions) {
-        if (signal.aborted) throw new Error('任务已停止');
-        appendHarnessLog('执行：' + DeepSeekHarnessProtocol.actionLabel(action), 'action', taskTabId);
-        try {
-          const result = await executeHarnessAction(tab.id, action);
-          previousResults.push({ action, ok: true, result: result || null });
-          await waitForHarnessAction(action);
-        } catch (error) {
-          previousResults.push({ action, ok: false, error: error.message });
-          appendHarnessLog('动作失败：' + error.message, 'error', taskTabId);
-          throw error;
-        }
-      }
-
-      if (parsed.done) {
-        completed = true;
-        break;
-      }
-      setHarnessStatus('动作已执行，正在读取页面变化…', '', taskTabId);
-    }
-
-    if (isCurrentPanelTab(taskTabId)) setHarnessConnectionState('connected', '已连接');
-    setHarnessStatus(completed ? (lastMessage || '任务已完成。') : '已执行本轮动作，可继续描述下一步。', 'success', taskTabId);
-  } catch (error) {
-    const message = error && error.message ? error.message : String(error);
-    if (signal.aborted || message === '任务已停止') {
-      appendHarnessLog('任务已停止。', 'result', taskTabId);
-      setHarnessStatus('任务已停止。', '', taskTabId);
-    } else {
-      appendHarnessLog(message, 'error', taskTabId);
-      if (isCurrentPanelTab(taskTabId)) setHarnessConnectionState('error', '需要检查连接');
-      setHarnessStatus(message, 'error', taskTabId);
-    }
-  } finally {
-    if (nativeTargetBound) {
-      try { await sendHarnessBridgeCommand('unbind'); } catch (error) {}
-    }
-    harnessRunning = false;
-    harnessAbortController = null;
-    harnessRunningTabId = null;
-    if (isCurrentPanelTab(taskTabId)) {
-      harnessRunBtn.textContent = '运行任务';
-      harnessRefreshSnapshotBtn.disabled = false;
-    }
-    if (currentApp === 'harness' && currentTabId !== null) {
-      harnessRunBtn.disabled = false;
-      harnessRunBtn.textContent = '运行任务';
-      harnessRefreshSnapshotBtn.disabled = false;
-      activateHarnessPanel(currentTabId);
-    }
-  }
 }
 
 function queryTabById(tabId) {
@@ -1990,7 +1468,7 @@ reloadBtn.addEventListener('click', () => {
       frame.src = frameUrl;
       hideLoadingIfStillWaiting(currentApp, currentTabId);
     }
-    activateHarnessPanel(currentTabId);
+    activateHarnessBridge(currentTabId);
     return;
   }
   const frame = frameGroupForTab(currentTabId, false)?.get(currentApp);
@@ -2001,29 +1479,6 @@ reloadBtn.addEventListener('click', () => {
   hideLoadingIfStillWaiting(currentApp, currentTabId);
 });
 zoomLabel.addEventListener('dblclick', () => applyZoom(100));
-harnessOpenBtn.addEventListener('click', () => {
-  try {
-    chrome.tabs.create({ url: currentHarnessUrl });
-  } catch (error) {
-    setHarnessStatus('无法打开 Harness 页面。', 'error');
-  }
-});
-harnessRefreshSnapshotBtn.addEventListener('click', () => refreshHarnessPanel(false));
-harnessRunBtn.addEventListener('click', runHarnessTask);
-harnessTask.addEventListener('keydown', event => {
-  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-    event.preventDefault();
-    runHarnessTask();
-  }
-});
-harnessTask.addEventListener('input', () => {
-  const state = getPanelState(currentTabId);
-  if (state) state.harnessTask = harnessTask.value;
-});
-harnessAutoRun.addEventListener('change', () => {
-  const state = getPanelState(currentTabId);
-  if (state) state.harnessAutoRun = harnessAutoRun.checked;
-});
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); applyZoom(currentZoom + ZOOM_STEP); }
@@ -2052,7 +1507,6 @@ setTimeout(() => loading.classList.add('hidden'), 8000);
   currentHarnessToken = typeof result[HARNESS_TOKEN_KEY] === 'string'
     ? result[HARNESS_TOKEN_KEY] : '';
   await loadPanelStateStore(initialTab && initialTab.id);
-  updateHarnessEndpoint();
   tabLifecycleReady = true;
   const pending = pendingActiveTab;
   pendingActiveTab = null;

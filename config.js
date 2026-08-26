@@ -281,7 +281,7 @@ async function testHarnessConnection() {
         ' · 原生 bridge 已发现';
     } else {
       harnessStatusEl.textContent = (info.title ? 'HTTP API 可用 · ' + info.title : 'HTTP API 可用') +
-        ' · 未发现原生 bridge，将使用兼容模式';
+        ' · 未发现原生 bridge，真实页面仍可打开但暂不能操作当前网页';
     }
   } catch (e) {
     harnessStatusEl.textContent = e && e.message ? e.message : '连接失败';
