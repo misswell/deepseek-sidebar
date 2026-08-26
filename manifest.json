@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DeepSeek Sidebar",
-  "version": "1.9.6",
+  "version": "1.9.7",
   "description": "Open AI chat sites in Chrome sidebar and let a local DeepSeek Harness operate the current page",
   "permissions": [
     "sidePanel",
@@ -60,6 +60,19 @@
     ]
   },
   "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "frame-route-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true,
+      "match_origin_as_fallback": true
+    },
     {
       "matches": [
         "http://*/*",

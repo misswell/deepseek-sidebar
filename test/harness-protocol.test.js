@@ -7,6 +7,7 @@ const ROOT_DIR = path.resolve(__dirname, '..');
 
 const manifest = require('../manifest.json');
 const protocol = require('../harness-protocol.js');
+const tabState = require('../tab-state.js');
 const HarnessClient = require('../harness-client.js');
 const HarnessBridgeClient = require('../harness-bridge-client.js');
 
@@ -270,6 +271,7 @@ test('loads a page bridge instead of input-filling content scripts', () => {
   assert.ok(manifest.permissions.includes('debugger'));
   const scripts = manifest.content_scripts.flatMap(item => item.js || []);
   assert.ok(scripts.includes('page-bridge.js'));
+  assert.ok(scripts.includes('frame-route-bridge.js'));
   assert.equal(scripts.includes('ai-input-fill.js'), false);
   assert.equal(scripts.includes('harness-embedded-bridge.js'), false);
   assert.equal(fs.existsSync(path.join(ROOT_DIR, 'ai-input-fill.js')), false);
@@ -279,11 +281,19 @@ test('loads a page bridge instead of input-filling content scripts', () => {
   assert.match(pageBridge, /__deepseekSidebarPageBridgeInstalled\) return/);
   assert.match(pageBridge, /requestSubmit\(\)/);
   assert.doesNotMatch(pageBridge, /form\.dispatchEvent\(new Event\(['"]submit['"]\)/);
+
+  const routeBridge = fs.readFileSync(path.join(ROOT_DIR, 'frame-route-bridge.js'), 'utf8');
+  assert.match(routeBridge, /deepseek-sidebar-frame-route/);
+  assert.match(routeBridge, /deepseek-sidebar-frame-route-init/);
+  assert.match(routeBridge, /event\.source !== window\.parent/);
+  assert.match(routeBridge, /historyApi\.pushState/);
+  const routeScript = manifest.content_scripts.find(item => (item.js || []).includes('frame-route-bridge.js'));
+  assert.equal(routeScript && routeScript.world, 'MAIN');
 });
 
-test('keeps the native Harness panel outside the AI iframe and input path', () => {
+test('uses the real local Harness page while keeping browser tools outside the input path', () => {
   const sidepanel = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8');
-  assert.doesNotMatch(sidepanel, /harness-embed-shell/);
+  assert.match(sidepanel, /harness-page-frame/);
   assert.match(sidepanel, /harness-bridge-status/);
   assert.match(sidepanel, /browser_\* 工具/);
   assert.match(sidepanel, /不会被塞进 DeepSeek 网页输入框/);
@@ -300,6 +310,23 @@ test('routes the side panel state by browser tab like the Codex side panel', () 
   assert.match(fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8'), /tab-state\.js/);
   assert.match(background, /chrome\.sidePanel\.open\(target\)/);
   assert.match(background, /\{ windowId: tab\.windowId \}/);
+});
+
+test('opens the real local Harness conversation page and restores its route per tab', () => {
+  assert.equal(tabState.DEFAULT_APP, 'harness');
+  const state = tabState.normalizeState({
+    app: 'harness',
+    frameUrls: { harness: 'http://127.0.0.1:3080/conversations/demo' }
+  });
+  assert.equal(state.frameUrls.harness, 'http://127.0.0.1:3080/conversations/demo');
+
+  const sidepanel = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.js'), 'utf8');
+  const html = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8');
+  assert.match(sidepanel, /frameUrls/);
+  assert.match(sidepanel, /frame\.src = frameUrl/);
+  assert.match(sidepanel, /deepseek-sidebar-frame-route/);
+  assert.match(sidepanel, /FRAME_ROUTE_INIT_SOURCE/);
+  assert.match(html, /harness-page-frame/);
 });
 
 test('exposes the bridge tool surface and token setting', () => {

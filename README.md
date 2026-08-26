@@ -9,7 +9,7 @@
 - **选择页面元素** — 像 DevTools 一样选取当前页面元素，自动提取文本到扩展自己的阅读器
 - **页面元素阅读器** — 选中元素后弹出浮动面板，可展开查看或复制文本；不会把页面内容塞进任何 AI 输入框
 - **复制页面内容** — 一键复制选中的页面元素文本到剪贴板
-- **DeepSeek Harness 原生网页代理** — 配置 `http://127.0.0.1:3080/` 或自己的 Harness 地址，通过 WebSocket bridge 让 Harness 直接调用当前页面的 `browser_*` 工具
+- **真实 DeepSeek Harness 对话页** — 默认在侧边栏打开 `http://127.0.0.1:3080/`，也可以设置自己的 Harness 地址；通过 WebSocket bridge 让本地页面直接调用当前页面的 `browser_*` 工具
 - **页面与 DevTools 分离** — 扩展在当前标签页读取和执行页面动作；需要时还可把 Chrome DevTools Protocol 调用交给 `chrome.debugger`，不依赖 AI 网站输入框
 - **本地连接测试** — 在设置页验证 Harness API、原生 bridge 和可选 token；网页内容只在 Harness 请求浏览器工具时发送
 - **按页面隔离侧栏** — 仿照 Codex 扩展，按 Chrome `tabId` 保存每个页面的应用、会话、任务输入、日志、阅读器和缩放状态；切换标签页时恢复各自的右侧窗口
@@ -24,6 +24,12 @@
 - **千问（qianwen.com）深度适配** — 自动修改 User-Agent 模拟移动设备、隐藏 iframe 检测、阻止 visibilitychange 等事件，确保千问移动版在侧边栏中正常渲染
 - **请求头修改** — 自动移除 X-Frame-Options / Content-Security-Policy 响应头，使 AI 站点可在侧边栏 iframe 中加载
 - **简洁工具栏** — 深色主题，不干扰对话体验
+
+## 1.9.7
+
+- 侧栏默认显示真实的本地 DeepSeek Harness 页面，不再显示扩展自定义任务面板
+- 按标签页和应用恢复 iframe 的对话路由，重新打开侧栏时回到上次对话页面
+- 原生 bridge 自动绑定当前标签页，页面工具仍由扩展读取和执行，不把页面内容塞入输入框
 
 ## 1.9.6
 
@@ -72,7 +78,7 @@
    curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.sh | bash
    ```
 6. 打开扩展设置，在「DeepSeek Harness 网页代理」中填写服务地址（默认 `http://127.0.0.1:3080/`）和可选 token，然后测试连接
-7. 在侧边栏点击 Harness 图标，输入网页任务；页面内容由扩展自己的 browser 工具读取，不会写入 DeepSeek/ChatGPT 等网站的输入框
+7. 在侧边栏打开 Harness 图标，直接使用本地 DeepSeek 对话页面发起任务；页面内容由扩展自己的 browser 工具读取，不会写入 DeepSeek/ChatGPT 等网站的输入框
 
 如果当前 Harness 只有 `/api` 而没有 `/ext/bridge-config`，扩展会显示兼容模式。要使用原生网页工具，请重启并安装带 bridge 插件的 Harness；Chrome 本机连接通常无需 token，远程地址请填写服务端 token。
 
@@ -87,8 +93,8 @@
 ├── harness-extension-transport.js # 通过 Harness 同源宿主页转发扩展 RPC
 ├── harness-host-bridge.js  # 在 Harness 同源页面内转发 API 请求，避免放宽服务端 CORS
 ├── page-bridge.js          # 注入当前网页的文本快照与动作执行桥
-├── sidepanel.html          # 侧边栏页面（工具栏 + AI iframe + Harness 工具面板）
-├── sidepanel.js            # 按标签页隔离的缩放、应用切换、元素选择、页面阅读器逻辑
+├── sidepanel.html          # 侧边栏页面（工具栏 + AI iframe + 本地 Harness 页面）
+├── sidepanel.js            # 按标签页隔离的 iframe 路由、缩放、应用切换和页面工具逻辑
 ├── tab-state.js            # 标签页状态规范化、迁移和清理
 ├── ua-override.js          # 注入千问的 content script，修改 UA 并隐藏 iframe 检测
 ├── rules.json              # declarativeNetRequest 规则（移除响应头 + 修改请求头）
@@ -106,7 +112,7 @@
 | sidePanel | 在 Chrome 侧边栏中展示 AI 聊天站点 |
 | activeTab | 用户点击扩展后支持选择当前标签页中的页面元素（网页代理同时使用 `<all_urls>`） |
 | tabs | 查询当前标签页，并创建后台 Harness 宿主页面 |
-| storage | 本地保存用户的缩放比例、应用选择和每个标签页的 Harness 会话状态 |
+| storage | 本地保存用户的缩放比例、应用选择、每个标签页的 Harness 会话和对话路由 |
 | scripting | 为页面选择器和 Harness 的 browser 工具注入页面桥接脚本 |
 | debugger | 为 Harness 暴露受控的 Chrome DevTools Protocol 调用入口 |
 | webNavigation | 枚举当前标签页的主文档与 iframe，让原生网页工具按 `frame + index` 路由 |

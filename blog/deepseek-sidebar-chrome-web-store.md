@@ -60,13 +60,15 @@ DeepSeek Sidebar 还提供了一个很适合阅读、研究和写作的功能：
 
 ## 连接本地 DeepSeek Harness 操作网页
 
-在设置中填写自己的 Harness 服务地址，例如 `http://127.0.0.1:3080/`。安装带 `/ext/bridge` 的 bridge 插件后，Harness 会通过 `browser_snapshot`、`browser_click`、`browser_type`、`browser_scroll` 和导航工具直接操作当前 Chrome 标签页。扩展自己读取页面并返回文本快照，页面内容不会被塞进 DeepSeek、ChatGPT 等网站的输入框；需要 DevTools 能力时，也可以使用受控的 Chrome DevTools Protocol 通道。
+侧边栏的 Harness 入口直接加载真实的本地 DeepSeek 页面，默认地址是 `http://127.0.0.1:3080/`，也可以在设置中填写自己的地址。安装带 `/ext/bridge` 的 bridge 插件后，DeepSeek Harness 页面会通过 `browser_snapshot`、`browser_click`、`browser_type`、`browser_scroll` 和导航工具直接操作当前 Chrome 标签页。扩展自己读取页面并返回文本快照，页面内容不会被塞进 DeepSeek、ChatGPT 等网站的输入框；需要 DevTools 能力时，也可以使用受控的 Chrome DevTools Protocol 通道。
+
+每个 Chrome 标签页都有独立的 Harness 对话 iframe 和路由。关闭后重新打开侧边栏，仍会回到该标签页上次的对话页面，不会退回扩展自定义的起始面板。
 
 ## 更适合长期放在侧边栏里的细节
 
 为了让它更像一个日常工具，而不是一次性的网页嵌入，DeepSeek Sidebar 做了一些细节处理：
 
-- 仿照 Codex 扩展按 `tabId` 隔离每个页面的右侧窗口状态
+- 仿照 Codex 扩展按 `tabId` 隔离每个页面的右侧窗口状态和对话路由
 - 自动记住上次使用的 AI 站点
 - 工具栏保持简洁的深色主题，尽量不干扰对话
 - 支持刷新当前 AI 页面
@@ -77,7 +79,7 @@ DeepSeek Sidebar 还提供了一个很适合阅读、研究和写作的功能：
 
 DeepSeek Sidebar 不收集任何用户数据。
 
-扩展会在本地按标签页保存缩放比例、上次选择的 AI 站点、Harness 会话编号和侧栏状态。选择页面元素时，脚本只在你主动点击按钮后临时注入当前标签页，用于读取你选中的元素文本；文本只显示在扩展阅读器中，或由你主动复制。原生 Harness 模式下，页面内容只在 Harness 请求浏览器工具时通过 bridge 返回。
+扩展会在本地按标签页保存缩放比例、上次选择的 AI 站点、Harness 会话编号、对话路由和侧栏状态。选择页面元素时，脚本只在你主动点击按钮后临时注入当前标签页，用于读取你选中的元素文本；文本只显示在扩展阅读器中，或由你主动复制。原生 Harness 模式下，页面内容只在 Harness 请求浏览器工具时通过 bridge 返回。
 
 你也可以查看完整隐私政策：
 

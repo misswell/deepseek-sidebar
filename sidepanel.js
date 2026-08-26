@@ -37,7 +37,11 @@ const HARNESS_URL_KEY = 'deepseek-sidebar-harness-url';
 const HARNESS_TOKEN_KEY = 'deepseek-sidebar-harness-token';
 const HARNESS_SESSION_KEY = 'deepseek-sidebar-harness-session';
 const TAB_STATE_KEY = 'deepseek-sidebar-tab-states';
+const TAB_STATE_VERSION_KEY = 'deepseek-sidebar-tab-state-version';
+const TAB_STATE_VERSION = 2;
 const HARNESS_BRIDGE_SOURCE = 'deepseek-sidebar-harness-bridge';
+const FRAME_ROUTE_SOURCE = 'deepseek-sidebar-frame-route';
+const FRAME_ROUTE_INIT_SOURCE = 'deepseek-sidebar-frame-route-init';
 const ZOOM_STEP = 10;
 const ZOOM_MIN = 30;
 const ZOOM_MAX = 200;
@@ -86,6 +90,7 @@ let harnessRunning = false;
 let harnessAbortController = null;
 let nativeHarnessBridge = { state: 'stopped', connected: false, caps: null, error: '' };
 let harnessBridgePort = null;
+let harnessTargetBoundTabId = null;
 let pickingTabId = null;
 let pickCancelled = false;
 let pickWaitResolver = null;
@@ -122,6 +127,7 @@ function createPanelState(tabId, stableState) {
     app: normalized.app,
     zoom: normalized.zoom,
     harnessSessionId: normalized.harnessSessionId,
+    frameUrls: { ...normalized.frameUrls },
     pageText: '',
     pageReader: {
       hidden: true,
@@ -145,13 +151,13 @@ function getPanelState(tabId) {
     tabPanelStates.set(id, createPanelState(id, DeepSeekSidebarTabState.getTabState(persistedTabStates, id)));
   }
   const state = tabPanelStates.get(id);
-  if (!APPS[state.app]) state.app = 'deepseek';
+  if (!APPS[state.app]) state.app = DeepSeekSidebarTabState.DEFAULT_APP;
   return state;
 }
 
 function firstVisibleApp() {
   const orderedIds = appOrder.length > 0 ? appOrder : APP_META.map(app => app.id);
-  return orderedIds.find(id => appVisibility[id] !== false) || 'deepseek';
+  return orderedIds.find(id => appVisibility[id] !== false) || DeepSeekSidebarTabState.DEFAULT_APP;
 }
 
 function ensureVisibleApp(tabId) {
@@ -187,7 +193,8 @@ function persistPanelState(tabId) {
   persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, id, {
     app: state.app,
     zoom: state.zoom,
-    harnessSessionId: state.harnessSessionId
+    harnessSessionId: state.harnessSessionId,
+    frameUrls: state.frameUrls
   });
   queueTabStateStorageWrite();
 }
@@ -225,19 +232,38 @@ async function loadPanelStateStore(initialTabId) {
     TAB_STATE_KEY,
     APP_KEY,
     ZOOM_KEY,
-    HARNESS_SESSION_KEY
+    HARNESS_SESSION_KEY,
+    TAB_STATE_VERSION_KEY
   ]);
   persistedTabStates = DeepSeekSidebarTabState.normalizeMap(result[TAB_STATE_KEY]);
+  const storedTabStateVersion = Number(result[TAB_STATE_VERSION_KEY]) || 0;
+  if (storedTabStateVersion < TAB_STATE_VERSION) {
+    Object.entries(persistedTabStates).forEach(([tabId, state]) => {
+      if (state.app === 'deepseek') {
+        persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, tabId, {
+          app: DeepSeekSidebarTabState.DEFAULT_APP
+        });
+      }
+    });
+  }
   const initialId = numericTabId(initialTabId);
   const initialKey = initialId === null ? null : String(initialId);
   const hasLegacyState = result[APP_KEY] || result[ZOOM_KEY] || result[HARNESS_SESSION_KEY];
   if (initialKey !== null && !persistedTabStates[initialKey] && hasLegacyState) {
     persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, initialId, {
-      app: result[APP_KEY],
+      app: storedTabStateVersion < TAB_STATE_VERSION && result[APP_KEY] === 'deepseek'
+        ? DeepSeekSidebarTabState.DEFAULT_APP : result[APP_KEY],
       zoom: result[ZOOM_KEY],
       harnessSessionId: result[HARNESS_SESSION_KEY]
     });
+  }
+  if (storedTabStateVersion < TAB_STATE_VERSION) {
     queueTabStateStorageWrite();
+    try {
+      chrome.storage.local.set({ [TAB_STATE_VERSION_KEY]: TAB_STATE_VERSION }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (error) {}
   }
   const openTabIds = await readOpenTabIds();
   if (openTabIds) {
@@ -364,6 +390,68 @@ function removeTabFrames(tabId) {
   loadedAppGroups.delete(id);
 }
 
+function resetAppFrames(appId) {
+  frameGroups.forEach((group, tabId) => {
+    const frame = group.get(appId);
+    if (frame) frame.remove();
+    group.delete(appId);
+    const loadedApps = loadedAppGroups.get(tabId);
+    if (loadedApps) loadedApps.delete(appId);
+  });
+  tabPanelStates.forEach(state => {
+    if (state.frameUrls && state.frameUrls[appId]) delete state.frameUrls[appId];
+  });
+  Object.keys(persistedTabStates).forEach(tabId => {
+    persistedTabStates = DeepSeekSidebarTabState.setFrameUrl(persistedTabStates, tabId, appId, '');
+  });
+  queueTabStateStorageWrite();
+}
+
+function isHarnessFrameUrl(url) {
+  try {
+    const base = new URL(currentHarnessUrl);
+    const candidate = new URL(url);
+    if (candidate.origin !== base.origin) return false;
+    const basePath = base.pathname.replace(/\/+$/, '');
+    return !basePath || candidate.pathname === basePath || candidate.pathname.startsWith(basePath + '/');
+  } catch (error) {
+    return false;
+  }
+}
+
+function frameUrlForApp(appId, tabId) {
+  const state = getPanelState(tabId);
+  const savedUrl = state && state.frameUrls ? state.frameUrls[appId] : '';
+  if (savedUrl && (appId !== 'harness' || isHarnessFrameUrl(savedUrl))) return savedUrl;
+  if (appId === 'harness') return currentHarnessUrl;
+  return APPS[appId] && APPS[appId].url ? APPS[appId].url : '';
+}
+
+function persistFrameRoute(tabId, appId, url, frame) {
+  const targetTabId = numericTabId(tabId);
+  const state = getPanelState(targetTabId);
+  const normalizedUrl = DeepSeekSidebarTabState.normalizeFrameUrl(url);
+  if (!state || !normalizedUrl || (appId === 'harness' && !isHarnessFrameUrl(normalizedUrl))) return;
+  if (state.frameUrls[appId] === normalizedUrl) return;
+  state.frameUrls[appId] = normalizedUrl;
+  if (frame) frame.dataset.currentUrl = normalizedUrl;
+  persistPanelState(targetTabId);
+}
+
+function handleFrameRouteMessage(event) {
+  const data = event && event.data;
+  if (!data || data.source !== FRAME_ROUTE_SOURCE || typeof data.url !== 'string') return;
+  for (const [tabId, group] of frameGroups.entries()) {
+    for (const [appId, frame] of group.entries()) {
+      if (frame.contentWindow !== event.source) continue;
+      persistFrameRoute(tabId, appId, data.url, frame);
+      return;
+    }
+  }
+}
+
+window.addEventListener('message', handleFrameRouteMessage, true);
+
 function scheduleTabActivation(tabId, windowId) {
   tabActivationQueue = tabActivationQueue
     .catch(() => {})
@@ -400,6 +488,7 @@ function forgetTabState(tabId) {
   const id = numericTabId(tabId);
   if (id === null) return;
   if (currentTabId === id) captureCurrentPanelState();
+  if (harnessTargetBoundTabId === id) unbindHarnessTarget();
   tabPanelStates.delete(id);
   persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, id);
   removeTabFrames(id);
@@ -449,6 +538,7 @@ function bindTabLifecycleListeners() {
     if (oldId === null || newId === null) return;
     const wasCurrent = currentTabId === oldId;
     if (wasCurrent) captureCurrentPanelState();
+    if (harnessTargetBoundTabId === oldId) harnessTargetBoundTabId = null;
     if (tabPanelStates.has(oldId) && !tabPanelStates.has(newId)) {
       tabPanelStates.set(newId, tabPanelStates.get(oldId));
       tabPanelStates.get(newId).tabId = newId;
@@ -569,18 +659,22 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderAppButtons();
   }
   if (changes[HARNESS_URL_KEY]) {
+    const previousHarnessUrl = currentHarnessUrl;
     try {
       currentHarnessUrl = DeepSeekHarnessProtocol.normalizeHarnessUrl(changes[HARNESS_URL_KEY].newValue);
     } catch (e) {
       currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
     }
     updateHarnessEndpoint();
-    if (currentApp === 'harness') activateHarnessPanel(true, currentTabId);
+    if (currentHarnessUrl !== previousHarnessUrl) {
+      resetAppFrames('harness');
+      if (currentApp === 'harness') renderCurrentApp();
+    }
   }
   if (changes[HARNESS_TOKEN_KEY]) {
     currentHarnessToken = typeof changes[HARNESS_TOKEN_KEY].newValue === 'string'
       ? changes[HARNESS_TOKEN_KEY].newValue : '';
-    if (currentApp === 'harness') activateHarnessPanel(true, currentTabId);
+    if (currentApp === 'harness') activateHarnessPanel(currentTabId);
   }
 });
 
@@ -603,7 +697,11 @@ function hideLoadingIfStillWaiting(appId, tabId) {
 
 function setupFrameLoadState(frame, appId, tabId) {
   frame.addEventListener('load', () => {
+    try {
+      frame.contentWindow.postMessage({ source: FRAME_ROUTE_INIT_SOURCE }, '*');
+    } catch (error) {}
     loadedAppsForTab(tabId, true).add(appId);
+    persistFrameRoute(tabId, appId, frame.dataset.currentUrl || frame.getAttribute('src') || frame.src, frame);
     if (isCurrentPanelTab(tabId) && currentApp === appId) loading.classList.add('hidden');
   });
 }
@@ -616,11 +714,15 @@ function getOrCreateFrame(appId, tabId) {
   if (existingFrame) return existingFrame;
 
   const app = APPS[appId];
-  if (!app || !app.url) return null;
+  if (!app) return null;
+  const frameUrl = frameUrlForApp(appId, targetTabId);
+  if (!frameUrl) return null;
   const frame = document.createElement('iframe');
   frame.className = 'webview-frame hidden';
+  if (appId === 'harness') frame.classList.add('harness-page-frame');
   frame.dataset.app = appId;
   frame.dataset.tabId = String(targetTabId);
+  frame.dataset.currentUrl = frameUrl;
   frame.setAttribute('allow', IFRAME_ALLOW);
   frame.removeAttribute('sandbox');
   setupFrameLoadState(frame, appId, targetTabId);
@@ -628,7 +730,7 @@ function getOrCreateFrame(appId, tabId) {
   applyZoomToFrame(frame, state ? state.zoom : currentZoom);
   webviewContainer.appendChild(frame);
   group.set(appId, frame);
-  if (appId !== 'harness') frame.src = app.url;
+  frame.src = frameUrl;
   hideLoadingIfStillWaiting(appId, targetTabId);
   return frame;
 }
@@ -652,7 +754,33 @@ function setHarnessBridgeStatus(message, state) {
   }
 }
 
-async function activateHarnessPanel(forceRefresh, tabId) {
+async function bindHarnessTargetForTab(tabId) {
+  const targetTabId = numericTabId(tabId);
+  if (targetTabId === null || !nativeHarnessBridge.connected) return false;
+  const tab = await queryTabById(targetTabId);
+  if (unsupportedAutomationUrl(tab.url)) {
+    throw new Error('当前标签页不是可操作的普通网页');
+  }
+  if (!(await ensureAutomationPermission(tab))) {
+    throw new Error('需要允许扩展访问当前网页，才能让 Harness 操作它。');
+  }
+  if (harnessTargetBoundTabId === targetTabId) return true;
+  if (harnessTargetBoundTabId !== null) {
+    try { await sendHarnessBridgeCommand('unbind'); } catch (error) {}
+    harnessTargetBoundTabId = null;
+  }
+  await sendHarnessBridgeCommand('bind', { tabId: targetTabId });
+  harnessTargetBoundTabId = targetTabId;
+  return true;
+}
+
+function unbindHarnessTarget() {
+  if (harnessTargetBoundTabId === null) return;
+  harnessTargetBoundTabId = null;
+  void sendHarnessBridgeCommand('unbind').catch(() => {});
+}
+
+async function activateHarnessPanel(tabId) {
   const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
   if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
   setHarnessBridgeStatus('正在连接原生浏览器工具…', 'working');
@@ -663,7 +791,7 @@ async function activateHarnessPanel(forceRefresh, tabId) {
     });
     if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
     applyHarnessBridgeStatus(started);
-    const connected = await waitForNativeHarnessBridge(forceRefresh ? 600 : 1800);
+    const connected = await waitForNativeHarnessBridge(1800);
     if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
     // Do not leave a reconnect loop running when this is an older Harness
     // instance without the browser bridge. The HTTP compatibility path below
@@ -673,8 +801,12 @@ async function activateHarnessPanel(forceRefresh, tabId) {
         const stopped = await sendHarnessBridgeCommand('stop');
         applyHarnessBridgeStatus(stopped);
       } catch (error) {}
+      return;
     }
-    await refreshHarnessPanel(Boolean(forceRefresh), targetTabId);
+    await bindHarnessTargetForTab(targetTabId);
+    if (isCurrentPanelTab(targetTabId) && currentApp === 'harness') {
+      setHarnessBridgeStatus('本地 DeepSeek 页面已连接当前标签页', 'done');
+    }
   } catch (error) {
     if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
     try {
@@ -682,12 +814,24 @@ async function activateHarnessPanel(forceRefresh, tabId) {
       applyHarnessBridgeStatus(stopped);
     } catch (stopError) {}
     setHarnessBridgeStatus(error && error.message ? error.message : 'Harness bridge 未启用', 'error');
-    await refreshHarnessPanel(true, targetTabId);
   }
 }
 
 function hideAllFrames() {
   frameGroups.forEach(group => group.forEach(frame => frame.classList.add('hidden')));
+}
+
+function renderFrameApp(appId, tabId) {
+  const frame = getOrCreateFrame(appId, tabId);
+  const group = frameGroupForTab(tabId, false);
+  if (!frame || !group) return;
+  group.forEach((item, id) => item.classList.toggle('hidden', id !== appId));
+  group.forEach(item => applyZoomToFrame(item, currentZoom));
+  if ((loadedAppsForTab(tabId, false) || new Set()).has(appId)) loading.classList.add('hidden');
+  else {
+    loading.classList.remove('hidden');
+    hideLoadingIfStillWaiting(appId, tabId);
+  }
 }
 
 function renderCurrentApp() {
@@ -698,26 +842,18 @@ function renderCurrentApp() {
   appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === currentApp));
   hideAllFrames();
   if (currentApp === 'harness') {
-    harnessPanel.classList.remove('hidden');
-    loading.classList.add('hidden');
+    harnessPanel.classList.add('hidden');
     updateHarnessEndpoint();
+    renderFrameApp(currentApp, currentTabId);
     harnessRunBtn.textContent = harnessRunningTabId === currentTabId ? '停止任务' : '运行任务';
     harnessRunBtn.disabled = harnessRunning && harnessRunningTabId !== currentTabId;
     harnessRefreshSnapshotBtn.disabled = harnessRunning;
-    if (!harnessRunning) activateHarnessPanel(false, currentTabId);
+    if (!harnessRunning) activateHarnessPanel(currentTabId);
     return;
   }
   harnessPanel.classList.add('hidden');
-  const frame = getOrCreateFrame(currentApp, currentTabId);
-  const group = frameGroupForTab(currentTabId, false);
-  if (!frame || !group) return;
-  group.forEach((item, id) => item.classList.toggle('hidden', id !== currentApp));
-  group.forEach(item => applyZoomToFrame(item, currentZoom));
-  if ((loadedAppsForTab(currentTabId, false) || new Set()).has(currentApp)) loading.classList.add('hidden');
-  else {
-    loading.classList.remove('hidden');
-    hideLoadingIfStillWaiting(currentApp, currentTabId);
-  }
+  unbindHarnessTarget();
+  renderFrameApp(currentApp, currentTabId);
 }
 
 function switchApp(appId) {
@@ -763,6 +899,9 @@ function applyHarnessBridgeStatus(status) {
     caps: status.caps || null,
     error: status.error || ''
   };
+  if (!nativeHarnessBridge.connected && nativeHarnessBridge.state === 'stopped') {
+    harnessTargetBoundTabId = null;
+  }
   if (nativeHarnessBridge.connected) {
     setHarnessConnectionState('connected', '原生网页工具已连接');
     setHarnessBridgeStatus('原生网页工具已就绪，模型会直接调用当前页面', 'done');
@@ -1305,7 +1444,7 @@ async function runHarnessTask() {
       harnessRunBtn.disabled = false;
       harnessRunBtn.textContent = '运行任务';
       harnessRefreshSnapshotBtn.disabled = false;
-      activateHarnessPanel(false, currentTabId);
+      activateHarnessPanel(currentTabId);
     }
   }
 }
@@ -1843,14 +1982,22 @@ configBtn.addEventListener('click', () => {
 });
 reloadBtn.addEventListener('click', () => {
   if (currentApp === 'harness') {
-    activateHarnessPanel(true, currentTabId);
+    const frame = frameGroupForTab(currentTabId, false)?.get(currentApp);
+    if (frame) {
+      loadedAppsForTab(currentTabId, true).delete(currentApp);
+      loading.classList.remove('hidden');
+      const frameUrl = frame.dataset.currentUrl || frameUrlForApp(currentApp, currentTabId);
+      frame.src = frameUrl;
+      hideLoadingIfStillWaiting(currentApp, currentTabId);
+    }
+    activateHarnessPanel(currentTabId);
     return;
   }
   const frame = frameGroupForTab(currentTabId, false)?.get(currentApp);
   if (!frame) return;
   loadedAppsForTab(currentTabId, true).delete(currentApp);
   loading.classList.remove('hidden');
-  frame.src = frame.src;
+  frame.src = frame.dataset.currentUrl || frame.src;
   hideLoadingIfStillWaiting(currentApp, currentTabId);
 });
 zoomLabel.addEventListener('dblclick', () => applyZoom(100));

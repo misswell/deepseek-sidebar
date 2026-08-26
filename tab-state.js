@@ -1,10 +1,11 @@
 (function (root) {
   'use strict';
 
-  const DEFAULT_APP = 'deepseek';
+  const DEFAULT_APP = 'harness';
   const DEFAULT_ZOOM = 100;
   const MIN_ZOOM = 30;
   const MAX_ZOOM = 200;
+  const MAX_FRAME_URL_LENGTH = 4096;
 
   function tabKey(tabId) {
     if (tabId === null || tabId === undefined ||
@@ -19,12 +20,35 @@
     return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(numeric)));
   }
 
+  function normalizeFrameUrl(value) {
+    if (typeof value !== 'string' || !value.trim() || value.length > MAX_FRAME_URL_LENGTH) return '';
+    try {
+      const url = new URL(value.trim());
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return '';
+      return url.toString();
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function normalizeFrameUrls(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const result = {};
+    Object.entries(value).forEach(([app, url]) => {
+      if (!app || app.length > 80) return;
+      const normalizedUrl = normalizeFrameUrl(url);
+      if (normalizedUrl) result[app] = normalizedUrl;
+    });
+    return result;
+  }
+
   function normalizeState(value) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     return {
       app: typeof source.app === 'string' && source.app.trim() ? source.app : DEFAULT_APP,
       zoom: normalizeZoom(source.zoom),
-      harnessSessionId: typeof source.harnessSessionId === 'string' ? source.harnessSessionId : ''
+      harnessSessionId: typeof source.harnessSessionId === 'string' ? source.harnessSessionId : '',
+      frameUrls: normalizeFrameUrls(source.frameUrls)
     };
   }
 
@@ -53,6 +77,25 @@
     return result;
   }
 
+  function getFrameUrl(map, tabId, app) {
+    if (typeof app !== 'string' || !app.trim()) return '';
+    const state = getTabState(map, tabId);
+    return state && state.frameUrls ? state.frameUrls[app] || '' : '';
+  }
+
+  function setFrameUrl(map, tabId, app, url) {
+    const result = normalizeMap(map);
+    const key = tabKey(tabId);
+    if (key === null || typeof app !== 'string' || !app.trim()) return result;
+    const state = normalizeState(result[key]);
+    const frameUrls = { ...state.frameUrls };
+    const normalizedUrl = normalizeFrameUrl(url);
+    if (normalizedUrl) frameUrls[app] = normalizedUrl;
+    else delete frameUrls[app];
+    result[key] = normalizeState({ ...state, frameUrls });
+    return result;
+  }
+
   function removeTabState(map, tabId) {
     const result = normalizeMap(map);
     const key = tabKey(tabId);
@@ -77,10 +120,14 @@
     MAX_ZOOM,
     tabKey,
     normalizeZoom,
+    normalizeFrameUrl,
+    normalizeFrameUrls,
     normalizeState,
     normalizeMap,
     getTabState,
     setTabState,
+    getFrameUrl,
+    setFrameUrl,
     removeTabState,
     replaceTabState
   };
