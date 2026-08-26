@@ -29,7 +29,7 @@
   </ul>
 
   <h2>本地存储</h2>
-  <p>本扩展使用 <code>chrome.storage.local</code> 在您的设备本地保存缩放比例、上次选择的应用、Harness 地址、可选 bridge token 和 Harness 会话编号。该数据仅存储在您的浏览器中，不会发送到扩展作者的服务器。</p>
+  <p>本扩展使用 <code>chrome.storage.local</code> 在您的设备本地按浏览器标签页保存缩放比例、上次选择的应用、Harness 地址、可选 bridge token 和 Harness 会话编号。该数据仅存储在您的浏览器中，不会发送到扩展作者的服务器。</p>
   <p>当您点击选择页面元素按钮时，本扩展会在当前标签页中执行一次性脚本以读取选中元素的可见文本。文本只显示在本地页面阅读器中，或由您主动复制；本扩展不会把选中内容填充到 DeepSeek、ChatGPT 或其他 AI 网站的输入框。</p>
   <p>原生模式下，用户任务通过 WebSocket bridge 发送给您配置的 Harness；只有当 Harness 请求 <code>browser_snapshot</code>、<code>browser_get_text</code> 或其他浏览器工具时，扩展才读取当前页面并返回结构化文本。页面文本不会截图，也不会经过第三方 AI 网站的输入框。兼容模式下，页面快照会作为 API 请求的一部分发送到您配置的 Harness 地址。该地址可以是本机或您控制的局域网/远程服务；本扩展不会把这些内容发送到开发者的服务器。</p>
 
@@ -41,7 +41,7 @@
   <ul>
     <li><strong>sidePanel</strong> — 在 Chrome 侧边栏中展示 AI 聊天站点</li>
     <li><strong>activeTab</strong> — 用户点击扩展后临时授权选择当前标签页中的页面元素</li>
-    <li><strong>storage</strong> — 在本地保存缩放比例设置</li>
+    <li><strong>storage</strong> — 在本地保存按标签页隔离的侧栏状态和连接设置</li>
     <li><strong>tabs</strong> — 查询当前标签页，并在 HTTP 兼容模式下创建后台 Harness 宿主页面</li>
     <li><strong>scripting</strong> — 为页面选择器和 Harness 的 browser 工具注入页面桥接脚本</li>
     <li><strong>debugger</strong> — 为 Harness 提供受控的 Chrome DevTools Protocol 调用入口</li>

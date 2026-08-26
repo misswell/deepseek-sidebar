@@ -12,17 +12,24 @@
 - **DeepSeek Harness 原生网页代理** — 配置 `http://127.0.0.1:3080/` 或自己的 Harness 地址，通过 WebSocket bridge 让 Harness 直接调用当前页面的 `browser_*` 工具
 - **页面与 DevTools 分离** — 扩展在当前标签页读取和执行页面动作；需要时还可把 Chrome DevTools Protocol 调用交给 `chrome.debugger`，不依赖 AI 网站输入框
 - **本地连接测试** — 在设置页验证 Harness API、原生 bridge 和可选 token；网页内容只在 Harness 请求浏览器工具时发送
+- **按页面隔离侧栏** — 仿照 Codex 扩展，按 Chrome `tabId` 保存每个页面的应用、会话、任务输入、日志、阅读器和缩放状态；切换标签页时恢复各自的右侧窗口
 - **自由缩放** — 工具栏按钮或 Ctrl/Cmd +/-/0 快捷键，30%-200% 范围调节
 - **双击重置缩放** — 双击缩放百分比标签一键恢复 100%
 - **记忆缩放** — 自动保存缩放比例，下次打开立即恢复
 - **记忆上次应用** — 自动记住上次使用的 AI 站点，下次打开自动恢复
 - **刷新侧边栏** — 工具栏刷新按钮一键重新加载当前 AI 页面
-- **iframe 延迟加载** — 每个 AI 站点只创建一个 iframe，切换时显示/隐藏，不重复加载，节省资源
+- **iframe 延迟加载** — 每个页面的 AI 站点只创建一个 iframe，切换应用时显示/隐藏，不重复加载，节省资源
 - **自动处理页面跳转** — 选择元素时如果页面发生跳转，自动等待加载后继续选择，无需重新操作
 - **智能权限请求** — 首次选择元素时自动请求必要权限，引导用户完成授权
 - **千问（qianwen.com）深度适配** — 自动修改 User-Agent 模拟移动设备、隐藏 iframe 检测、阻止 visibilitychange 等事件，确保千问移动版在侧边栏中正常渲染
 - **请求头修改** — 自动移除 X-Frame-Options / Content-Security-Policy 响应头，使 AI 站点可在侧边栏 iframe 中加载
 - **简洁工具栏** — 深色主题，不干扰对话体验
+
+## 1.9.6
+
+- 按 Chrome 标签页隔离侧栏状态，切换页面时恢复各自的应用、Harness 会话和阅读器状态
+- 每个页面独立维护 AI iframe，避免多个页面共用同一个右侧窗口内容
+- 监听标签页激活、关闭和替换，自动保存、清理或迁移对应状态
 
 ## 1.9.5
 
@@ -81,7 +88,8 @@
 ├── harness-host-bridge.js  # 在 Harness 同源页面内转发 API 请求，避免放宽服务端 CORS
 ├── page-bridge.js          # 注入当前网页的文本快照与动作执行桥
 ├── sidepanel.html          # 侧边栏页面（工具栏 + AI iframe + Harness 工具面板）
-├── sidepanel.js            # 缩放控制、应用切换、元素选择、页面阅读器逻辑
+├── sidepanel.js            # 按标签页隔离的缩放、应用切换、元素选择、页面阅读器逻辑
+├── tab-state.js            # 标签页状态规范化、迁移和清理
 ├── ua-override.js          # 注入千问的 content script，修改 UA 并隐藏 iframe 检测
 ├── rules.json              # declarativeNetRequest 规则（移除响应头 + 修改请求头）
 ├── privacy-policy.html     # 隐私政策
@@ -98,7 +106,7 @@
 | sidePanel | 在 Chrome 侧边栏中展示 AI 聊天站点 |
 | activeTab | 用户点击扩展后支持选择当前标签页中的页面元素（网页代理同时使用 `<all_urls>`） |
 | tabs | 查询当前标签页，并创建后台 Harness 宿主页面 |
-| storage | 本地保存用户的缩放比例和应用选择设置 |
+| storage | 本地保存用户的缩放比例、应用选择和每个标签页的 Harness 会话状态 |
 | scripting | 为页面选择器和 Harness 的 browser 工具注入页面桥接脚本 |
 | debugger | 为 Harness 暴露受控的 Chrome DevTools Protocol 调用入口 |
 | webNavigation | 枚举当前标签页的主文档与 iframe，让原生网页工具按 `frame + index` 路由 |

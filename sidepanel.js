@@ -36,6 +36,7 @@ const ORDER_KEY = 'deepseek-sidebar-order';
 const HARNESS_URL_KEY = 'deepseek-sidebar-harness-url';
 const HARNESS_TOKEN_KEY = 'deepseek-sidebar-harness-token';
 const HARNESS_SESSION_KEY = 'deepseek-sidebar-harness-session';
+const TAB_STATE_KEY = 'deepseek-sidebar-tab-states';
 const HARNESS_BRIDGE_SOURCE = 'deepseek-sidebar-harness-bridge';
 const ZOOM_STEP = 10;
 const ZOOM_MIN = 30;
@@ -74,6 +75,8 @@ const APP_META = [
 
 let currentZoom = 100;
 let currentApp = null;
+let currentTabId = null;
+let currentWindowId = null;
 let currentPageText = '';
 let currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
 let currentHarnessToken = '';
@@ -87,13 +90,386 @@ let pickingTabId = null;
 let pickCancelled = false;
 let pickWaitResolver = null;
 let pickPendingNavigation = false;
+let harnessRunningTabId = null;
+let tabPanelStates = new Map();
+let persistedTabStates = {};
+let tabStateStorageWrite = Promise.resolve();
+let tabLifecycleReady = false;
+let pendingActiveTab = null;
+let tabActivationQueue = Promise.resolve();
 const appSwitcher = document.getElementById('appSwitcher');
 const configBtn = document.getElementById('config-btn');
 let appButtons = [];  // populated dynamically by renderAppButtons()
 let appVisibility = {};  // { appId: true/false }
 let appOrder = [];  // ordered array of app ids
-const frames = new Map();
-const loadedApps = new Set();
+const frameGroups = new Map();
+const loadedAppGroups = new Map();
+
+function numericTabId(tabId) {
+  const key = DeepSeekSidebarTabState.tabKey(tabId);
+  return key === null ? null : Number(key);
+}
+
+function isCurrentPanelTab(tabId) {
+  const id = numericTabId(tabId);
+  return id !== null && id === currentTabId;
+}
+
+function createPanelState(tabId, stableState) {
+  const normalized = DeepSeekSidebarTabState.normalizeState(stableState);
+  return {
+    tabId: numericTabId(tabId),
+    app: normalized.app,
+    zoom: normalized.zoom,
+    harnessSessionId: normalized.harnessSessionId,
+    pageText: '',
+    pageReader: {
+      hidden: true,
+      expanded: false,
+      title: '当前页面内容',
+      meta: '',
+      status: ''
+    },
+    harnessSnapshot: null,
+    harnessTask: '',
+    harnessAutoRun: true,
+    harnessLog: [],
+    harnessStatus: { message: '', kind: '' }
+  };
+}
+
+function getPanelState(tabId) {
+  const id = numericTabId(tabId);
+  if (id === null) return null;
+  if (!tabPanelStates.has(id)) {
+    tabPanelStates.set(id, createPanelState(id, DeepSeekSidebarTabState.getTabState(persistedTabStates, id)));
+  }
+  const state = tabPanelStates.get(id);
+  if (!APPS[state.app]) state.app = 'deepseek';
+  return state;
+}
+
+function firstVisibleApp() {
+  const orderedIds = appOrder.length > 0 ? appOrder : APP_META.map(app => app.id);
+  return orderedIds.find(id => appVisibility[id] !== false) || 'deepseek';
+}
+
+function ensureVisibleApp(tabId) {
+  const state = getPanelState(tabId);
+  if (!state) return null;
+  if (appVisibility[state.app] === false) {
+    state.app = firstVisibleApp();
+    persistPanelState(tabId);
+  }
+  return state;
+}
+
+function queueTabStateStorageWrite() {
+  const snapshot = JSON.parse(JSON.stringify(persistedTabStates));
+  tabStateStorageWrite = tabStateStorageWrite
+    .catch(() => {})
+    .then(() => new Promise(resolve => {
+      try {
+        chrome.storage.local.set({ [TAB_STATE_KEY]: snapshot }, () => {
+          void chrome.runtime.lastError;
+          resolve();
+        });
+      } catch (error) {
+        resolve();
+      }
+    }));
+}
+
+function persistPanelState(tabId) {
+  const state = getPanelState(tabId);
+  const id = numericTabId(tabId);
+  if (!state || id === null) return;
+  persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, id, {
+    app: state.app,
+    zoom: state.zoom,
+    harnessSessionId: state.harnessSessionId
+  });
+  queueTabStateStorageWrite();
+}
+
+function readLocalStorage(keys) {
+  return new Promise(resolve => {
+    try {
+      chrome.storage.local.get(keys, result => {
+        void chrome.runtime.lastError;
+        resolve(result || {});
+      });
+    } catch (error) {
+      resolve({});
+    }
+  });
+}
+
+function readOpenTabIds() {
+  return new Promise(resolve => {
+    try {
+      chrome.tabs.query({}, tabs => {
+        void chrome.runtime.lastError;
+        resolve(new Set((tabs || [])
+          .map(tab => numericTabId(tab && tab.id))
+          .filter(id => id !== null)));
+      });
+    } catch (error) {
+      resolve(null);
+    }
+  });
+}
+
+async function loadPanelStateStore(initialTabId) {
+  const result = await readLocalStorage([
+    TAB_STATE_KEY,
+    APP_KEY,
+    ZOOM_KEY,
+    HARNESS_SESSION_KEY
+  ]);
+  persistedTabStates = DeepSeekSidebarTabState.normalizeMap(result[TAB_STATE_KEY]);
+  const initialId = numericTabId(initialTabId);
+  const initialKey = initialId === null ? null : String(initialId);
+  const hasLegacyState = result[APP_KEY] || result[ZOOM_KEY] || result[HARNESS_SESSION_KEY];
+  if (initialKey !== null && !persistedTabStates[initialKey] && hasLegacyState) {
+    persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, initialId, {
+      app: result[APP_KEY],
+      zoom: result[ZOOM_KEY],
+      harnessSessionId: result[HARNESS_SESSION_KEY]
+    });
+    queueTabStateStorageWrite();
+  }
+  const openTabIds = await readOpenTabIds();
+  if (openTabIds) {
+    let removedStaleState = false;
+    Object.keys(persistedTabStates).forEach(tabId => {
+      if (!openTabIds.has(Number(tabId))) {
+        persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, tabId);
+        removedStaleState = true;
+      }
+    });
+    if (removedStaleState) queueTabStateStorageWrite();
+  }
+  tabPanelStates.clear();
+  Object.entries(persistedTabStates).forEach(([tabId, state]) => {
+    const id = numericTabId(tabId);
+    if (id !== null) tabPanelStates.set(id, createPanelState(id, state));
+  });
+}
+
+function readHarnessLogEntries() {
+  return Array.from(harnessLogList.children)
+    .map(item => ({
+      message: item.textContent || '',
+      kind: item.classList.contains('error') ? 'error'
+        : item.classList.contains('action') ? 'action'
+          : item.classList.contains('result') ? 'result' : ''
+    }))
+    .filter(item => item.message && !item.message.startsWith('输入任务后'));
+}
+
+function renderHarnessLogEntries(entries) {
+  harnessLogList.innerHTML = '';
+  const values = Array.isArray(entries) ? entries.filter(item => item && item.message) : [];
+  if (!values.length) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'harness-log-item';
+    placeholder.textContent = '输入任务后，Harness 会通过 browser_* 工具按需读取并操作当前页面。';
+    harnessLogList.appendChild(placeholder);
+    return;
+  }
+  values.slice(-24).forEach(item => {
+    const element = document.createElement('div');
+    element.className = 'harness-log-item' + (item.kind ? ' ' + item.kind : '');
+    element.textContent = item.message;
+    harnessLogList.appendChild(element);
+  });
+  harnessLogList.lastElementChild && harnessLogList.lastElementChild.scrollIntoView({ block: 'nearest' });
+}
+
+function captureCurrentPanelState() {
+  const state = getPanelState(currentTabId);
+  if (!state) return;
+  if (currentApp) state.app = currentApp;
+  state.zoom = currentZoom;
+  state.harnessSessionId = currentHarnessSessionId || '';
+  state.pageText = currentPageText || '';
+  state.pageReader = {
+    hidden: pageReader.classList.contains('hidden'),
+    expanded: pageReader.classList.contains('expanded'),
+    title: pageReaderTitle.textContent || '当前页面内容',
+    meta: pageReaderMeta.textContent || '',
+    status: pageReaderStatus.textContent || ''
+  };
+  state.harnessSnapshot = currentHarnessSnapshot || null;
+  state.harnessTask = harnessTask.value || '';
+  state.harnessAutoRun = Boolean(harnessAutoRun.checked);
+  state.harnessLog = readHarnessLogEntries();
+  state.harnessStatus = {
+    message: harnessStatus.textContent || '',
+    kind: harnessStatus.classList.contains('error') ? 'error'
+      : harnessStatus.classList.contains('success') ? 'success' : ''
+  };
+}
+
+function restorePanelState(tabId) {
+  const state = getPanelState(tabId);
+  if (!state) return;
+  currentApp = state.app;
+  currentZoom = state.zoom;
+  currentPageText = state.pageText || '';
+  currentHarnessSessionId = state.harnessSessionId || '';
+  currentHarnessSnapshot = state.harnessSnapshot || null;
+  harnessTask.value = state.harnessTask || '';
+  harnessAutoRun.checked = state.harnessAutoRun !== false;
+  pageReaderTitle.textContent = state.pageReader.title || '当前页面内容';
+  pageReaderMeta.textContent = state.pageReader.meta || '';
+  pageReaderContent.value = currentPageText;
+  pageReaderStatus.textContent = state.pageReader.status || '';
+  pageReader.classList.toggle('hidden', state.pageReader.hidden !== false);
+  setPageReaderExpanded(state.pageReader.expanded === true);
+  renderHarnessLogEntries(state.harnessLog);
+  updateHarnessSnapshotCard(currentHarnessSnapshot, tabId);
+  setHarnessStatus(state.harnessStatus.message, state.harnessStatus.kind, tabId);
+  zoomLabel.textContent = currentZoom + '%';
+}
+
+function frameGroupForTab(tabId, create) {
+  const id = numericTabId(tabId);
+  if (id === null) return null;
+  let group = frameGroups.get(id);
+  if (!group && create) {
+    group = new Map();
+    frameGroups.set(id, group);
+  }
+  return group || null;
+}
+
+function loadedAppsForTab(tabId, create) {
+  const id = numericTabId(tabId);
+  if (id === null) return null;
+  let apps = loadedAppGroups.get(id);
+  if (!apps && create) {
+    apps = new Set();
+    loadedAppGroups.set(id, apps);
+  }
+  return apps || null;
+}
+
+function removeTabFrames(tabId) {
+  const id = numericTabId(tabId);
+  const group = frameGroupForTab(id, false);
+  if (group) group.forEach(frame => frame.remove());
+  frameGroups.delete(id);
+  loadedAppGroups.delete(id);
+}
+
+function scheduleTabActivation(tabId, windowId) {
+  tabActivationQueue = tabActivationQueue
+    .catch(() => {})
+    .then(() => activateTab(tabId, windowId));
+  return tabActivationQueue;
+}
+
+function activateTab(tabId, windowId) {
+  const id = numericTabId(tabId);
+  if (id === null) return;
+  if (currentTabId === id && (windowId === undefined || currentWindowId === windowId)) return;
+
+  if (pickingTabId !== null && pickingTabId !== id) {
+    pickCancelled = true;
+    void executeElementPickCancel(pickingTabId);
+    if (pickWaitResolver) pickWaitResolver('cancelled');
+  }
+  if (harnessRunning && harnessRunningTabId !== null && harnessRunningTabId !== id) {
+    harnessAbortController && harnessAbortController.abort();
+  }
+
+  captureCurrentPanelState();
+  if (currentTabId !== null) persistPanelState(currentTabId);
+  currentTabId = id;
+  if (windowId !== undefined) currentWindowId = windowId;
+  restorePanelState(id);
+  const state = ensureVisibleApp(id);
+  if (state) currentApp = state.app;
+  renderAppButtons();
+  renderCurrentApp();
+}
+
+function forgetTabState(tabId) {
+  const id = numericTabId(tabId);
+  if (id === null) return;
+  if (currentTabId === id) captureCurrentPanelState();
+  tabPanelStates.delete(id);
+  persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, id);
+  removeTabFrames(id);
+  queueTabStateStorageWrite();
+  if (harnessRunningTabId === id && harnessAbortController) harnessAbortController.abort();
+}
+
+function bindTabLifecycleListeners() {
+  chrome.tabs.onActivated.addListener(activeInfo => {
+    if (!activeInfo || !Number.isSafeInteger(activeInfo.tabId)) return;
+    if (!tabLifecycleReady) {
+      pendingActiveTab = activeInfo;
+      return;
+    }
+    if (currentWindowId !== null && activeInfo.windowId !== currentWindowId) return;
+    scheduleTabActivation(activeInfo.tabId, activeInfo.windowId);
+  });
+
+  chrome.tabs.onCreated.addListener(tab => {
+    if (!tab || !tab.active || !Number.isSafeInteger(tab.id)) return;
+    if (!tabLifecycleReady) {
+      pendingActiveTab = { tabId: tab.id, windowId: tab.windowId };
+      return;
+    }
+    if (currentWindowId !== null && tab.windowId !== currentWindowId) return;
+    scheduleTabActivation(tab.id, tab.windowId);
+  });
+
+  chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+    const wasCurrent = currentTabId === tabId;
+    forgetTabState(tabId);
+    if (!wasCurrent) return;
+    currentTabId = null;
+    setTimeout(() => {
+      queryActiveTab().then(tab => {
+        if (!tab || !Number.isSafeInteger(tab.id)) return;
+        if (currentWindowId !== null && tab.windowId !== currentWindowId) return;
+        scheduleTabActivation(tab.id, tab.windowId);
+      }).catch(() => {});
+    }, 0);
+    void removeInfo;
+  });
+
+  chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+    const oldId = numericTabId(removedTabId);
+    const newId = numericTabId(addedTabId);
+    if (oldId === null || newId === null) return;
+    const wasCurrent = currentTabId === oldId;
+    if (wasCurrent) captureCurrentPanelState();
+    if (tabPanelStates.has(oldId) && !tabPanelStates.has(newId)) {
+      tabPanelStates.set(newId, tabPanelStates.get(oldId));
+      tabPanelStates.get(newId).tabId = newId;
+      tabPanelStates.delete(oldId);
+    }
+    persistedTabStates = DeepSeekSidebarTabState.replaceTabState(persistedTabStates, oldId, newId);
+    const oldFrames = frameGroups.get(oldId);
+    if (oldFrames && !frameGroups.has(newId)) frameGroups.set(newId, oldFrames);
+    const oldLoaded = loadedAppGroups.get(oldId);
+    if (oldLoaded && !loadedAppGroups.has(newId)) loadedAppGroups.set(newId, oldLoaded);
+    frameGroups.delete(oldId);
+    loadedAppGroups.delete(oldId);
+    queueTabStateStorageWrite();
+    if (wasCurrent) {
+      currentTabId = null;
+      scheduleTabActivation(newId, currentWindowId);
+    }
+  });
+}
+
+bindTabLifecycleListeners();
 
 function renderAppButtons() {
   appSwitcher.innerHTML = '';
@@ -166,9 +542,21 @@ function loadAppVisibility() {
 // Listen for visibility/order changes from config page
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
+  if (changes[TAB_STATE_KEY]) {
+    persistedTabStates = DeepSeekSidebarTabState.normalizeMap(changes[TAB_STATE_KEY].newValue);
+  }
   if (changes[VISIBILITY_KEY]) {
     appVisibility = changes[VISIBILITY_KEY].newValue || {};
+    if (currentApp && appVisibility[currentApp] === false) {
+      const state = getPanelState(currentTabId);
+      if (state) {
+        state.app = firstVisibleApp();
+        currentApp = state.app;
+        persistPanelState(currentTabId);
+      }
+    }
     renderAppButtons();
+    if (currentTabId !== null) renderCurrentApp();
   }
   if (changes[ORDER_KEY]) {
     const savedOrder = changes[ORDER_KEY].newValue;
@@ -187,56 +575,61 @@ chrome.storage.onChanged.addListener((changes, area) => {
       currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
     }
     updateHarnessEndpoint();
-    if (currentApp === 'harness') activateHarnessPanel(true);
+    if (currentApp === 'harness') activateHarnessPanel(true, currentTabId);
   }
   if (changes[HARNESS_TOKEN_KEY]) {
     currentHarnessToken = typeof changes[HARNESS_TOKEN_KEY].newValue === 'string'
       ? changes[HARNESS_TOKEN_KEY].newValue : '';
-    if (currentApp === 'harness') activateHarnessPanel(true);
-  }
-  if (changes[HARNESS_SESSION_KEY]) {
-    currentHarnessSessionId = changes[HARNESS_SESSION_KEY].newValue || '';
+    if (currentApp === 'harness') activateHarnessPanel(true, currentTabId);
   }
 });
 
-function applyZoomToFrame(frame) {
-  const scale = currentZoom / 100;
+function applyZoomToFrame(frame, zoom) {
+  const scale = (Number.isFinite(zoom) ? zoom : currentZoom) / 100;
   frame.style.transform = 'scale(' + scale + ')';
   frame.style.width = (100 / scale) + '%';
   frame.style.height = (100 / scale) + '%';
 }
 
-function hideLoadingIfStillWaiting(appId) {
+function hideLoadingIfStillWaiting(appId, tabId) {
+  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
   setTimeout(() => {
-    if (currentApp === appId && !loadedApps.has(appId)) {
+    if (isCurrentPanelTab(targetTabId) && currentApp === appId &&
+        !(loadedAppsForTab(targetTabId, false) || new Set()).has(appId)) {
       loading.classList.add('hidden');
     }
   }, 8000);
 }
 
-function setupFrameLoadState(frame, appId) {
+function setupFrameLoadState(frame, appId, tabId) {
   frame.addEventListener('load', () => {
-    loadedApps.add(appId);
-    if (currentApp === appId) loading.classList.add('hidden');
+    loadedAppsForTab(tabId, true).add(appId);
+    if (isCurrentPanelTab(tabId) && currentApp === appId) loading.classList.add('hidden');
   });
 }
 
-function getOrCreateFrame(appId) {
-  const existingFrame = frames.get(appId);
+function getOrCreateFrame(appId, tabId) {
+  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
+  const group = frameGroupForTab(targetTabId, true);
+  if (!group) return null;
+  const existingFrame = group.get(appId);
   if (existingFrame) return existingFrame;
 
   const app = APPS[appId];
+  if (!app || !app.url) return null;
   const frame = document.createElement('iframe');
   frame.className = 'webview-frame hidden';
   frame.dataset.app = appId;
+  frame.dataset.tabId = String(targetTabId);
   frame.setAttribute('allow', IFRAME_ALLOW);
   frame.removeAttribute('sandbox');
-  setupFrameLoadState(frame, appId);
-  applyZoomToFrame(frame);
+  setupFrameLoadState(frame, appId, targetTabId);
+  const state = getPanelState(targetTabId);
+  applyZoomToFrame(frame, state ? state.zoom : currentZoom);
   webviewContainer.appendChild(frame);
-  frames.set(appId, frame);
+  group.set(appId, frame);
   if (appId !== 'harness') frame.src = app.url;
-  hideLoadingIfStillWaiting(appId);
+  hideLoadingIfStillWaiting(appId, targetTabId);
   return frame;
 }
 
@@ -259,16 +652,19 @@ function setHarnessBridgeStatus(message, state) {
   }
 }
 
-async function activateHarnessPanel(forceRefresh) {
-  if (currentApp !== 'harness') return;
+async function activateHarnessPanel(forceRefresh, tabId) {
+  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
+  if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
   setHarnessBridgeStatus('正在连接原生浏览器工具…', 'working');
   try {
     const started = await sendHarnessBridgeCommand('start', {
       baseUrl: currentHarnessUrl,
       token: currentHarnessToken
     });
+    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
     applyHarnessBridgeStatus(started);
     const connected = await waitForNativeHarnessBridge(forceRefresh ? 600 : 1800);
+    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
     // Do not leave a reconnect loop running when this is an older Harness
     // instance without the browser bridge. The HTTP compatibility path below
     // remains available and the next refresh can try native mode again.
@@ -278,48 +674,75 @@ async function activateHarnessPanel(forceRefresh) {
         applyHarnessBridgeStatus(stopped);
       } catch (error) {}
     }
-    await refreshHarnessPanel(Boolean(forceRefresh));
+    await refreshHarnessPanel(Boolean(forceRefresh), targetTabId);
   } catch (error) {
+    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
     try {
       const stopped = await sendHarnessBridgeCommand('stop');
       applyHarnessBridgeStatus(stopped);
     } catch (stopError) {}
     setHarnessBridgeStatus(error && error.message ? error.message : 'Harness bridge 未启用', 'error');
-    await refreshHarnessPanel(true);
+    await refreshHarnessPanel(true, targetTabId);
+  }
+}
+
+function hideAllFrames() {
+  frameGroups.forEach(group => group.forEach(frame => frame.classList.add('hidden')));
+}
+
+function renderCurrentApp() {
+  const state = ensureVisibleApp(currentTabId);
+  if (!state) return;
+  currentApp = state.app;
+  if (!APPS[currentApp]) return;
+  appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === currentApp));
+  hideAllFrames();
+  if (currentApp === 'harness') {
+    harnessPanel.classList.remove('hidden');
+    loading.classList.add('hidden');
+    updateHarnessEndpoint();
+    harnessRunBtn.textContent = harnessRunningTabId === currentTabId ? '停止任务' : '运行任务';
+    harnessRunBtn.disabled = harnessRunning && harnessRunningTabId !== currentTabId;
+    harnessRefreshSnapshotBtn.disabled = harnessRunning;
+    if (!harnessRunning) activateHarnessPanel(false, currentTabId);
+    return;
+  }
+  harnessPanel.classList.add('hidden');
+  const frame = getOrCreateFrame(currentApp, currentTabId);
+  const group = frameGroupForTab(currentTabId, false);
+  if (!frame || !group) return;
+  group.forEach((item, id) => item.classList.toggle('hidden', id !== currentApp));
+  group.forEach(item => applyZoomToFrame(item, currentZoom));
+  if ((loadedAppsForTab(currentTabId, false) || new Set()).has(currentApp)) loading.classList.add('hidden');
+  else {
+    loading.classList.remove('hidden');
+    hideLoadingIfStillWaiting(currentApp, currentTabId);
   }
 }
 
 function switchApp(appId) {
   const app = APPS[appId];
   if (!app) return;
+  captureCurrentPanelState();
   currentApp = appId;
-  appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === appId));
-  if (appId === 'harness') {
-    frames.forEach(item => item.classList.add('hidden'));
-    harnessPanel.classList.remove('hidden');
-    loading.classList.add('hidden');
-    updateHarnessEndpoint();
-    activateHarnessPanel(false);
-    try { chrome.storage.local.set({ [APP_KEY]: appId }); } catch (e) {}
-    return;
+  const state = getPanelState(currentTabId);
+  if (state) {
+    state.app = appId;
+    persistPanelState(currentTabId);
   }
-  harnessPanel.classList.add('hidden');
-  getOrCreateFrame(appId);
-  frames.forEach((item, id) => item.classList.toggle('hidden', id !== appId));
-  if (loadedApps.has(appId)) loading.classList.add('hidden');
-  else {
-    loading.classList.remove('hidden');
-    hideLoadingIfStillWaiting(appId);
-  }
-  applyZoom(currentZoom);
-  try { chrome.storage.local.set({ [APP_KEY]: appId }); } catch (e) {}
+  renderCurrentApp();
 }
 
 function applyZoom(zoom) {
-  currentZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
-  frames.forEach(applyZoomToFrame);
+  currentZoom = DeepSeekSidebarTabState.normalizeZoom(zoom);
+  const state = getPanelState(currentTabId);
+  if (state) {
+    state.zoom = currentZoom;
+    persistPanelState(currentTabId);
+  }
+  const group = frameGroupForTab(currentTabId, false);
+  if (group) group.forEach(frame => applyZoomToFrame(frame, currentZoom));
   zoomLabel.textContent = currentZoom + '%';
-  try { chrome.storage.local.set({ [ZOOM_KEY]: currentZoom }); } catch (e) {}
 }
 
 function updateHarnessEndpoint() {
@@ -460,24 +883,26 @@ function connectHarnessBridgePort() {
 
 connectHarnessBridgePort();
 
-function setHarnessStatus(message, kind) {
+function setHarnessStatus(message, kind, tabId) {
+  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
+  const state = getPanelState(targetTabId);
+  if (state) state.harnessStatus = { message: message || '', kind: kind || '' };
+  if (!isCurrentPanelTab(targetTabId)) return;
   harnessStatus.textContent = message || '';
   harnessStatus.classList.remove('error', 'success');
   if (kind) harnessStatus.classList.add(kind);
 }
 
-function appendHarnessLog(message, kind) {
+function appendHarnessLog(message, kind, tabId) {
   if (!message) return;
-  if (harnessLogList.children.length === 1 &&
-      harnessLogList.firstElementChild.textContent.startsWith('输入任务后')) {
-    harnessLogList.innerHTML = '';
-  }
-  const item = document.createElement('div');
-  item.className = 'harness-log-item' + (kind ? ' ' + kind : '');
-  item.textContent = message;
-  harnessLogList.appendChild(item);
-  while (harnessLogList.children.length > 24) harnessLogList.firstElementChild.remove();
-  item.scrollIntoView({ block: 'nearest' });
+  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
+  const state = getPanelState(targetTabId);
+  if (!state) return;
+  state.harnessLog = [...(Array.isArray(state.harnessLog) ? state.harnessLog : []), {
+    message: String(message),
+    kind: kind || ''
+  }].slice(-24);
+  if (isCurrentPanelTab(targetTabId)) renderHarnessLogEntries(state.harnessLog);
 }
 
 function permissionContains(origins) {
@@ -561,8 +986,12 @@ async function ensureHarnessServerPermission() {
   return await requestOriginPermission(origin);
 }
 
-function updateHarnessSnapshotCard(snapshot) {
-  currentHarnessSnapshot = snapshot;
+function updateHarnessSnapshotCard(snapshot, tabId) {
+  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
+  const state = getPanelState(targetTabId);
+  if (state) state.harnessSnapshot = snapshot || null;
+  if (!isCurrentPanelTab(targetTabId)) return;
+  currentHarnessSnapshot = snapshot || null;
   harnessPageTitle.textContent = snapshot && snapshot.title ? snapshot.title : '未命名页面';
   harnessPageUrl.textContent = snapshot && snapshot.url ? snapshot.url : '';
   const interactiveCount = snapshot && Array.isArray(snapshot.interactive) ? snapshot.interactive.length : 0;
@@ -586,80 +1015,93 @@ async function getHarnessPageSnapshot(tabId, signal) {
   throw lastError || new Error('无法读取当前页面');
 }
 
-async function refreshHarnessConnection(silent) {
+async function refreshHarnessConnection(silent, tabId) {
+  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
+  if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return null;
   try {
     const client = createHarnessClient({ timeoutMs: 6000 });
     const info = await client.describe();
+    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return null;
     const model = info && (info.model || info.provider);
     setHarnessConnectionState('connected', nativeHarnessBridge.connected
       ? '原生网页工具已连接'
       : model ? '兼容模式 · ' + model : '兼容模式已连接');
-    if (!silent) setHarnessStatus('本地 Harness 已连接。', 'success');
+    if (!silent) setHarnessStatus('本地 Harness 已连接。', 'success', targetTabId);
     return info;
   } catch (error) {
+    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return null;
     setHarnessConnectionState('error', '连接失败');
-    if (!silent) setHarnessStatus(error && error.message ? error.message : '无法连接 Harness', 'error');
+    if (!silent) setHarnessStatus(error && error.message ? error.message : '无法连接 Harness', 'error', targetTabId);
     return null;
   }
 }
 
-async function refreshHarnessPanel(silent) {
+async function refreshHarnessPanel(silent, tabId) {
+  const targetTabId = numericTabId(tabId === undefined ? currentTabId : tabId);
+  if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
   updateHarnessEndpoint();
   if (nativeHarnessBridge.connected) {
     try {
-      const tab = await queryActiveTab();
+      const tab = await queryTabById(targetTabId);
+      if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
       if (unsupportedAutomationUrl(tab.url)) {
-        updateHarnessSnapshotCard(null);
+        updateHarnessSnapshotCard(null, targetTabId);
         harnessPageTitle.textContent = '此页面不允许扩展读取';
         harnessSnapshotMeta.textContent = '请切换到普通 http/https 网页';
-        if (!silent) setHarnessStatus('当前 Chrome 系统页面不能被网页代理访问。', 'error');
+        if (!silent) setHarnessStatus('当前 Chrome 系统页面不能被网页代理访问。', 'error', targetTabId);
         return;
       }
       if (!(await ensureAutomationPermission(tab))) {
-        updateHarnessSnapshotCard(null);
+        updateHarnessSnapshotCard(null, targetTabId);
         harnessPageTitle.textContent = '等待网页访问权限';
         harnessSnapshotMeta.textContent = '运行任务时可以再次授权';
         return;
       }
       const snapshot = await getHarnessPageSnapshot(tab.id);
-      updateHarnessSnapshotCard(snapshot);
-      if (!silent) setHarnessStatus('原生网页工具已连接，页面快照已更新。', 'success');
+      if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
+      updateHarnessSnapshotCard(snapshot, targetTabId);
+      if (!silent) setHarnessStatus('原生网页工具已连接，页面快照已更新。', 'success', targetTabId);
     } catch (error) {
-      updateHarnessSnapshotCard(null);
+      if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
+      updateHarnessSnapshotCard(null, targetTabId);
       harnessPageTitle.textContent = '无法读取当前页面';
       harnessSnapshotMeta.textContent = '点击刷新或运行任务重试';
-      if (!silent) setHarnessStatus(error && error.message ? error.message : '无法读取当前页面', 'error');
+      if (!silent) setHarnessStatus(error && error.message ? error.message : '无法读取当前页面', 'error', targetTabId);
     }
     return;
   }
-  const connection = await refreshHarnessConnection(silent);
+  const connection = await refreshHarnessConnection(silent, targetTabId);
   if (!connection) return;
   try {
     if (!(await ensureHarnessServerPermission())) {
       throw new Error('需要允许扩展访问 Harness 服务地址。');
     }
-    const tab = await queryActiveTab();
+    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
+    const tab = await queryTabById(targetTabId);
+    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
     if (unsupportedAutomationUrl(tab.url)) {
-      updateHarnessSnapshotCard(null);
+      updateHarnessSnapshotCard(null, targetTabId);
       harnessPageTitle.textContent = '此页面不允许扩展读取';
       harnessSnapshotMeta.textContent = '请切换到普通 http/https 网页';
-      if (!silent) setHarnessStatus('当前 Chrome 系统页面不能被网页代理访问。', 'error');
+      if (!silent) setHarnessStatus('当前 Chrome 系统页面不能被网页代理访问。', 'error', targetTabId);
       return;
     }
     if (!(await ensureAutomationPermission(tab))) {
-      updateHarnessSnapshotCard(null);
+      updateHarnessSnapshotCard(null, targetTabId);
       harnessPageTitle.textContent = '等待网页访问权限';
       harnessSnapshotMeta.textContent = '点击“运行任务”时可以再次授权';
       return;
     }
     const snapshot = await getHarnessPageSnapshot(tab.id);
-    updateHarnessSnapshotCard(snapshot);
-    if (!silent) setHarnessStatus('页面快照已更新。', 'success');
+    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
+    updateHarnessSnapshotCard(snapshot, targetTabId);
+    if (!silent) setHarnessStatus('页面快照已更新。', 'success', targetTabId);
   } catch (error) {
-    updateHarnessSnapshotCard(null);
+    if (!isCurrentPanelTab(targetTabId) || currentApp !== 'harness') return;
+    updateHarnessSnapshotCard(null, targetTabId);
     harnessPageTitle.textContent = '无法读取当前页面';
     harnessSnapshotMeta.textContent = '点击刷新或运行任务重试';
-    if (!silent) setHarnessStatus(error && error.message ? error.message : '无法读取当前页面', 'error');
+    if (!silent) setHarnessStatus(error && error.message ? error.message : '无法读取当前页面', 'error', targetTabId);
   }
 }
 
@@ -676,15 +1118,24 @@ function waitForHarnessAction(action) {
 
 function stopHarnessTask() {
   if (harnessAbortController) harnessAbortController.abort();
-  setHarnessStatus('正在停止后续动作…');
+  setHarnessStatus('正在停止后续动作…', '', harnessRunningTabId === null ? currentTabId : harnessRunningTabId);
 }
 
-async function runNativeHarnessTask(task, signal) {
+function setHarnessSessionForTab(tabId, sessionId) {
+  const state = getPanelState(tabId);
+  if (!state) return;
+  state.harnessSessionId = typeof sessionId === 'string' ? sessionId : '';
+  if (isCurrentPanelTab(tabId)) currentHarnessSessionId = state.harnessSessionId;
+  persistPanelState(tabId);
+}
+
+async function runNativeHarnessTask(task, signal, tabId) {
+  const targetTabId = numericTabId(tabId);
   const client = createNativeHarnessClient({
     maxWaitMs: 90000,
     timeoutMs: 20000
   });
-  let sessionId = currentHarnessSessionId || '';
+  let sessionId = (getPanelState(targetTabId) || {}).harnessSessionId || '';
   const cancelActiveSession = () => {
     if (!sessionId) return;
     void client.cancel(sessionId, { timeoutMs: 5000 }).catch(() => {});
@@ -692,18 +1143,17 @@ async function runNativeHarnessTask(task, signal) {
   signal.addEventListener('abort', cancelActiveSession, { once: true });
   try {
     await client.describe({ signal });
-    appendHarnessLog('原生工具模式：任务只发送给 Harness，页面由 browser_* 工具按需读取；当前标签页已固定。', 'result');
+    appendHarnessLog('原生工具模式：任务只发送给 Harness，页面由 browser_* 工具按需读取；当前标签页已固定。', 'result', targetTabId);
     const response = await client.runPrompt(task, {
       sessionId,
       onSessionId: value => { sessionId = value; },
       signal,
       maxWaitMs: 90000
     });
-    currentHarnessSessionId = response.sessionId;
-    try { chrome.storage.local.set({ [HARNESS_SESSION_KEY]: response.sessionId }); } catch (e) {}
-    if (response.text) appendHarnessLog(response.text, 'result');
-    setHarnessConnectionState('connected', '原生网页工具已连接');
-    setHarnessStatus(response.text || '任务已完成。', 'success');
+    setHarnessSessionForTab(targetTabId, response.sessionId);
+    if (response.text) appendHarnessLog(response.text, 'result', targetTabId);
+    if (isCurrentPanelTab(targetTabId)) setHarnessConnectionState('connected', '原生网页工具已连接');
+    setHarnessStatus(response.text || '任务已完成。', 'success', targetTabId);
   } finally {
     signal.removeEventListener('abort', cancelActiveSession);
   }
@@ -711,7 +1161,8 @@ async function runNativeHarnessTask(task, signal) {
 
 async function runHarnessTask() {
   if (harnessRunning) {
-    stopHarnessTask();
+    if (harnessRunningTabId === currentTabId) stopHarnessTask();
+    else setHarnessStatus('另一个页面的任务正在运行，请稍候。', 'error', currentTabId);
     return;
   }
   const task = harnessTask.value.trim();
@@ -721,34 +1172,44 @@ async function runHarnessTask() {
     return;
   }
 
+  const taskTabId = numericTabId(currentTabId);
+  if (taskTabId === null) {
+    setHarnessStatus('未找到当前标签页。', 'error');
+    return;
+  }
   harnessRunning = true;
+  harnessRunningTabId = taskTabId;
   harnessAbortController = new AbortController();
   const signal = harnessAbortController.signal;
   harnessRunBtn.textContent = '停止任务';
   harnessRunBtn.disabled = false;
   harnessRefreshSnapshotBtn.disabled = true;
-  setHarnessStatus(nativeHarnessBridge.connected ? '正在启动原生网页工具…' : '正在读取当前页面…');
-  harnessLogList.innerHTML = '';
-  appendHarnessLog('任务：' + task);
+  setHarnessStatus(nativeHarnessBridge.connected ? '正在启动原生网页工具…' : '正在读取当前页面…', '', taskTabId);
+  const taskState = getPanelState(taskTabId);
+  if (taskState) taskState.harnessLog = [];
+  renderHarnessLogEntries([]);
+  appendHarnessLog('任务：' + task, '', taskTabId);
   let nativeTargetBound = false;
 
   try {
     if (!(await ensureHarnessServerPermission())) {
       throw new Error('需要允许扩展访问 Harness 服务地址。');
     }
-    const tab = await queryActiveTab();
+    if (signal.aborted || !isCurrentPanelTab(taskTabId)) throw new Error('任务已停止');
+    const tab = await queryTabById(taskTabId);
     if (!(await ensureAutomationPermission(tab))) {
       throw new Error('需要允许扩展访问当前网页，才能读取和操作它。');
     }
+    if (signal.aborted || !isCurrentPanelTab(taskTabId)) throw new Error('任务已停止');
     if (nativeHarnessBridge.connected) {
       await sendHarnessBridgeCommand('bind', { tabId: tab.id });
       nativeTargetBound = true;
-      await runNativeHarnessTask(task, signal);
+      await runNativeHarnessTask(task, signal, taskTabId);
       return;
     }
     const snapshot = await getHarnessPageSnapshot(tab.id, signal);
-    updateHarnessSnapshotCard(snapshot);
-    setHarnessConnectionState('connected', '正在规划动作…');
+    updateHarnessSnapshotCard(snapshot, taskTabId);
+    if (isCurrentPanelTab(taskTabId)) setHarnessConnectionState('connected', '正在规划动作…');
 
     const client = createHarnessClient({
       maxWaitMs: 90000,
@@ -756,7 +1217,7 @@ async function runHarnessTask() {
     });
     await client.describe({ signal });
 
-    let sessionId = currentHarnessSessionId || '';
+    let sessionId = (getPanelState(taskTabId) || {}).harnessSessionId || '';
     let previousResults = [];
     let lastMessage = '';
     let completed = false;
@@ -765,48 +1226,47 @@ async function runHarnessTask() {
       if (signal.aborted) throw new Error('任务已停止');
       if (round > 0) {
         const refreshed = await getHarnessPageSnapshot(tab.id, signal);
-        updateHarnessSnapshotCard(refreshed);
+        updateHarnessSnapshotCard(refreshed, taskTabId);
       }
       const prompt = DeepSeekHarnessProtocol.buildBrowserTaskPrompt({
         task,
-        snapshot: currentHarnessSnapshot || snapshot,
+        snapshot: (getPanelState(taskTabId) || {}).harnessSnapshot || snapshot,
         continuation: round > 0,
         previousResults
       });
-      appendHarnessLog('第 ' + (round + 1) + ' 轮：请求 Harness 规划…');
+      appendHarnessLog('第 ' + (round + 1) + ' 轮：请求 Harness 规划…', '', taskTabId);
       const response = await client.runPrompt(prompt, { sessionId, signal, maxWaitMs: 90000 });
       sessionId = response.sessionId;
-      currentHarnessSessionId = sessionId;
-      try { chrome.storage.local.set({ [HARNESS_SESSION_KEY]: sessionId }); } catch (e) {}
+      setHarnessSessionForTab(taskTabId, sessionId);
 
       const parsed = DeepSeekHarnessProtocol.parseBrowserActionResponse(response.text);
       lastMessage = parsed.message || '';
-      if (lastMessage) appendHarnessLog(lastMessage, 'result');
+      if (lastMessage) appendHarnessLog(lastMessage, 'result', taskTabId);
       if (!parsed.actions.length) {
         completed = parsed.done;
-        if (!parsed.message) appendHarnessLog('Harness 没有返回可执行动作。', 'result');
+        if (!parsed.message) appendHarnessLog('Harness 没有返回可执行动作。', 'result', taskTabId);
         break;
       }
 
       appendHarnessLog('模型提议 ' + parsed.actions.length + ' 个动作：' +
-        parsed.actions.map(DeepSeekHarnessProtocol.actionLabel).join('、'));
+        parsed.actions.map(DeepSeekHarnessProtocol.actionLabel).join('、'), '', taskTabId);
       if (!harnessAutoRun.checked) {
-        appendHarnessLog(JSON.stringify(parsed.actions, null, 2), 'result');
-        setHarnessStatus('动作已生成，但“自动执行模型动作”处于关闭状态。');
+        appendHarnessLog(JSON.stringify(parsed.actions, null, 2), 'result', taskTabId);
+        setHarnessStatus('动作已生成，但“自动执行模型动作”处于关闭状态。', '', taskTabId);
         break;
       }
 
       previousResults = [];
       for (const action of parsed.actions) {
         if (signal.aborted) throw new Error('任务已停止');
-        appendHarnessLog('执行：' + DeepSeekHarnessProtocol.actionLabel(action), 'action');
+        appendHarnessLog('执行：' + DeepSeekHarnessProtocol.actionLabel(action), 'action', taskTabId);
         try {
           const result = await executeHarnessAction(tab.id, action);
           previousResults.push({ action, ok: true, result: result || null });
           await waitForHarnessAction(action);
         } catch (error) {
           previousResults.push({ action, ok: false, error: error.message });
-          appendHarnessLog('动作失败：' + error.message, 'error');
+          appendHarnessLog('动作失败：' + error.message, 'error', taskTabId);
           throw error;
         }
       }
@@ -815,20 +1275,20 @@ async function runHarnessTask() {
         completed = true;
         break;
       }
-      setHarnessStatus('动作已执行，正在读取页面变化…');
+      setHarnessStatus('动作已执行，正在读取页面变化…', '', taskTabId);
     }
 
-    setHarnessConnectionState('connected', '已连接');
-    setHarnessStatus(completed ? (lastMessage || '任务已完成。') : '已执行本轮动作，可继续描述下一步。', 'success');
+    if (isCurrentPanelTab(taskTabId)) setHarnessConnectionState('connected', '已连接');
+    setHarnessStatus(completed ? (lastMessage || '任务已完成。') : '已执行本轮动作，可继续描述下一步。', 'success', taskTabId);
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
     if (signal.aborted || message === '任务已停止') {
-      appendHarnessLog('任务已停止。', 'result');
-      setHarnessStatus('任务已停止。');
+      appendHarnessLog('任务已停止。', 'result', taskTabId);
+      setHarnessStatus('任务已停止。', '', taskTabId);
     } else {
-      appendHarnessLog(message, 'error');
-      setHarnessConnectionState('error', '需要检查连接');
-      setHarnessStatus(message, 'error');
+      appendHarnessLog(message, 'error', taskTabId);
+      if (isCurrentPanelTab(taskTabId)) setHarnessConnectionState('error', '需要检查连接');
+      setHarnessStatus(message, 'error', taskTabId);
     }
   } finally {
     if (nativeTargetBound) {
@@ -836,9 +1296,35 @@ async function runHarnessTask() {
     }
     harnessRunning = false;
     harnessAbortController = null;
-    harnessRunBtn.textContent = '运行任务';
-    harnessRefreshSnapshotBtn.disabled = false;
+    harnessRunningTabId = null;
+    if (isCurrentPanelTab(taskTabId)) {
+      harnessRunBtn.textContent = '运行任务';
+      harnessRefreshSnapshotBtn.disabled = false;
+    }
+    if (currentApp === 'harness' && currentTabId !== null) {
+      harnessRunBtn.disabled = false;
+      harnessRunBtn.textContent = '运行任务';
+      harnessRefreshSnapshotBtn.disabled = false;
+      activateHarnessPanel(false, currentTabId);
+    }
   }
+}
+
+function queryTabById(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.get(tabId, tab => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+      if (!tab || typeof tab.id !== 'number') {
+        reject(new Error('未找到当前标签页'));
+        return;
+      }
+      resolve(tab);
+    });
+  });
 }
 
 function queryActiveTab() {
@@ -1249,6 +1735,11 @@ async function pickCurrentPageElement() {
         })
       ]);
 
+      if (!isCurrentPanelTab(pickingTabId)) {
+        pickCancelled = true;
+        break;
+      }
+
       if (result.kind === 'cancelled' || pickCancelled) {
         pageReaderStatus.textContent = '已取消选择';
         await executeElementPickCancel(pickingTabId);
@@ -1352,15 +1843,15 @@ configBtn.addEventListener('click', () => {
 });
 reloadBtn.addEventListener('click', () => {
   if (currentApp === 'harness') {
-    activateHarnessPanel(true);
+    activateHarnessPanel(true, currentTabId);
     return;
   }
-  const frame = frames.get(currentApp);
+  const frame = frameGroupForTab(currentTabId, false)?.get(currentApp);
   if (!frame) return;
-  loadedApps.delete(currentApp);
+  loadedAppsForTab(currentTabId, true).delete(currentApp);
   loading.classList.remove('hidden');
   frame.src = frame.src;
-  hideLoadingIfStillWaiting(currentApp);
+  hideLoadingIfStillWaiting(currentApp, currentTabId);
 });
 zoomLabel.addEventListener('dblclick', () => applyZoom(100));
 harnessOpenBtn.addEventListener('click', () => {
@@ -1378,6 +1869,14 @@ harnessTask.addEventListener('keydown', event => {
     runHarnessTask();
   }
 });
+harnessTask.addEventListener('input', () => {
+  const state = getPanelState(currentTabId);
+  if (state) state.harnessTask = harnessTask.value;
+});
+harnessAutoRun.addEventListener('change', () => {
+  const state = getPanelState(currentTabId);
+  if (state) state.harnessAutoRun = harnessAutoRun.checked;
+});
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); applyZoom(currentZoom + ZOOM_STEP); }
@@ -1390,35 +1889,29 @@ setTimeout(() => loading.classList.add('hidden'), 8000);
 (async () => {
   await loadAppVisibility();
   renderAppButtons();
-  let savedApp = 'deepseek';
-  let savedZoom = 100;
+  let initialTab = null;
   try {
-    const result = await new Promise((resolve, reject) => {
-      chrome.storage.local.get([
-        ZOOM_KEY,
-        APP_KEY,
-        HARNESS_URL_KEY,
-        HARNESS_TOKEN_KEY,
-        HARNESS_SESSION_KEY
-      ], resolve);
-    });
-    savedApp = result[APP_KEY] || 'deepseek';
-    savedZoom = result[ZOOM_KEY] || 100;
-    currentHarnessUrl = DeepSeekHarnessProtocol.normalizeHarnessUrl(result[HARNESS_URL_KEY]);
-    currentHarnessToken = typeof result[HARNESS_TOKEN_KEY] === 'string'
-      ? result[HARNESS_TOKEN_KEY] : '';
-    currentHarnessSessionId = result[HARNESS_SESSION_KEY] || '';
+    initialTab = await queryActiveTab();
+    currentWindowId = initialTab.windowId;
   } catch (e) {
-    // use defaults
+    initialTab = null;
+  }
+  const result = await readLocalStorage([HARNESS_URL_KEY, HARNESS_TOKEN_KEY]);
+  try {
+    currentHarnessUrl = DeepSeekHarnessProtocol.normalizeHarnessUrl(result[HARNESS_URL_KEY]);
+  } catch (e) {
     currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
   }
+  currentHarnessToken = typeof result[HARNESS_TOKEN_KEY] === 'string'
+    ? result[HARNESS_TOKEN_KEY] : '';
+  await loadPanelStateStore(initialTab && initialTab.id);
   updateHarnessEndpoint();
-  // If saved app is hidden, fall back to first visible app
-  if (appVisibility[savedApp] === false) {
-    const orderedIds = appOrder.length > 0 ? appOrder : APP_META.map(a => a.id);
-    const firstVisibleId = orderedIds.find(id => appVisibility[id] !== false);
-    savedApp = firstVisibleId || 'deepseek';
+  tabLifecycleReady = true;
+  const pending = pendingActiveTab;
+  pendingActiveTab = null;
+  if (pending && (currentWindowId === null || pending.windowId === currentWindowId)) {
+    await scheduleTabActivation(pending.tabId, pending.windowId);
+  } else if (initialTab && Number.isSafeInteger(initialTab.id)) {
+    await scheduleTabActivation(initialTab.id, initialTab.windowId);
   }
-  switchApp(savedApp);
-  applyZoom(savedZoom);
 })();

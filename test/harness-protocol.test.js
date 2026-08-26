@@ -289,6 +289,19 @@ test('keeps the native Harness panel outside the AI iframe and input path', () =
   assert.match(sidepanel, /不会被塞进 DeepSeek 网页输入框/);
 });
 
+test('routes the side panel state by browser tab like the Codex side panel', () => {
+  const sidepanel = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.js'), 'utf8');
+  const background = fs.readFileSync(path.join(ROOT_DIR, 'background.js'), 'utf8');
+  assert.match(sidepanel, /deepseek-sidebar-tab-states/);
+  assert.match(sidepanel, /chrome\.tabs\.onActivated/);
+  assert.match(sidepanel, /chrome\.tabs\.onRemoved/);
+  assert.match(sidepanel, /chrome\.tabs\.onReplaced/);
+  assert.match(sidepanel, /frameGroupForTab/);
+  assert.match(fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8'), /tab-state\.js/);
+  assert.match(background, /chrome\.sidePanel\.open\(target\)/);
+  assert.match(background, /\{ windowId: tab\.windowId \}/);
+});
+
 test('exposes the bridge tool surface and token setting', () => {
   assert.deepEqual(protocol.BRIDGE_TOOL_NAMES.slice(0, 11), [
     'browser_snapshot',

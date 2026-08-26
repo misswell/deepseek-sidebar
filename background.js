@@ -37,7 +37,12 @@ function broadcastHarnessBridgeStatus() {
 
 chrome.action.onClicked.addListener((tab) => {
   if (tab && typeof tab.id === 'number') {
-    chrome.sidePanel.open({ tabId: tab.id });
+    const target = typeof tab.windowId === 'number'
+      ? { windowId: tab.windowId }
+      : { tabId: tab.id };
+    try {
+      Promise.resolve(chrome.sidePanel.open(target)).catch(() => {});
+    } catch (error) {}
   }
 });
 
