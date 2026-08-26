@@ -14,6 +14,7 @@ const DEFAULT_ORDER = APPS.map(a => a.id);
 const VISIBILITY_KEY = 'deepseek-sidebar-visibility';
 const ORDER_KEY = 'deepseek-sidebar-order';
 const HARNESS_URL_KEY = 'deepseek-sidebar-harness-url';
+const HARNESS_TOKEN_KEY = 'deepseek-sidebar-harness-token';
 const DEFAULT_HARNESS_URL = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
 
 const appList = document.getElementById('appList');
@@ -21,6 +22,7 @@ const saveBtn = document.getElementById('saveBtn');
 const resetBtn = document.getElementById('resetBtn');
 const statusEl = document.getElementById('status');
 const harnessUrlInput = document.getElementById('harnessUrl');
+const harnessTokenInput = document.getElementById('harnessToken');
 const testHarnessBtn = document.getElementById('testHarnessBtn');
 const harnessStatusEl = document.getElementById('harnessStatus');
 
@@ -95,7 +97,12 @@ function renderAppList() {
 
 function loadSettings() {
   try {
-    chrome.storage.local.get([VISIBILITY_KEY, ORDER_KEY, HARNESS_URL_KEY], (result) => {
+    chrome.storage.local.get([
+      VISIBILITY_KEY,
+      ORDER_KEY,
+      HARNESS_URL_KEY,
+      HARNESS_TOKEN_KEY
+    ], (result) => {
       const savedVis = result[VISIBILITY_KEY];
       if (savedVis && typeof savedVis === 'object') {
         currentVisibility = savedVis;
@@ -120,12 +127,15 @@ function loadSettings() {
       } catch (e) {
         harnessUrlInput.value = DEFAULT_HARNESS_URL;
       }
+      harnessTokenInput.value = typeof result[HARNESS_TOKEN_KEY] === 'string'
+        ? result[HARNESS_TOKEN_KEY] : '';
       renderAppList();
     });
   } catch (e) {
     APPS.forEach(app => { currentVisibility[app.id] = true; });
     currentOrder = [...DEFAULT_ORDER];
     harnessUrlInput.value = DEFAULT_HARNESS_URL;
+    harnessTokenInput.value = '';
     renderAppList();
   }
 }
@@ -139,15 +149,17 @@ function saveSettings() {
     harnessStatusEl.classList.add('error');
     return;
   }
+  const harnessToken = harnessTokenInput.value.trim();
   try {
     harnessUrlInput.value = harnessUrl;
     chrome.storage.local.set({
       [VISIBILITY_KEY]: currentVisibility,
       [ORDER_KEY]: currentOrder,
-      [HARNESS_URL_KEY]: harnessUrl
+      [HARNESS_URL_KEY]: harnessUrl,
+      [HARNESS_TOKEN_KEY]: harnessToken
     }, () => {
       statusEl.textContent = '已保存 ✓';
-      harnessStatusEl.textContent = 'Harness 地址已保存。';
+      harnessStatusEl.textContent = 'Harness 地址和 bridge token 已保存。';
       harnessStatusEl.classList.remove('error');
       setTimeout(() => { statusEl.textContent = ''; }, 2000);
     });
@@ -160,12 +172,14 @@ function resetSettings() {
   DEFAULT_ORDER.forEach(id => { currentVisibility[id] = true; });
   currentOrder = [...DEFAULT_ORDER];
   harnessUrlInput.value = DEFAULT_HARNESS_URL;
+  harnessTokenInput.value = '';
   renderAppList();
   try {
     chrome.storage.local.set({
       [VISIBILITY_KEY]: currentVisibility,
       [ORDER_KEY]: currentOrder,
-      [HARNESS_URL_KEY]: DEFAULT_HARNESS_URL
+      [HARNESS_URL_KEY]: DEFAULT_HARNESS_URL,
+      [HARNESS_TOKEN_KEY]: ''
     }, () => {
       statusEl.textContent = '已恢复默认 ✓';
       setTimeout(() => { statusEl.textContent = ''; }, 2000);
@@ -217,6 +231,27 @@ function probeHarness(url) {
   });
 }
 
+function probeHarnessBridge(url) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
+      source: 'deepseek-sidebar-harness-bridge',
+      command: 'resolve',
+      baseUrl: url
+    }, response => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message));
+        return;
+      }
+      if (!response || response.ok !== true) {
+        reject(new Error(response && response.error ? response.error : '无法解析 Harness bridge 地址'));
+        return;
+      }
+      resolve(response.value);
+    });
+  });
+}
+
 async function testHarnessConnection() {
   let url;
   try {
@@ -233,12 +268,21 @@ async function testHarnessConnection() {
     if (!(await requestHarnessPermission(url))) {
       throw new Error('没有获得该 Harness 地址的访问权限。');
     }
-    const info = await probeHarness(url);
+    const [info, bridge] = await Promise.all([
+      probeHarness(url),
+      probeHarnessBridge(url)
+    ]);
     if (!info || info.ok !== true) {
       throw new Error('Harness 返回了异常状态（HTTP ' + (info && info.status ? info.status : '未知') + '）');
     }
     harnessUrlInput.value = url;
-    harnessStatusEl.textContent = info.title ? '连接成功 · ' + info.title : '连接成功';
+    if (bridge && bridge.discovered) {
+      harnessStatusEl.textContent = (info.title ? '连接成功 · ' + info.title : '连接成功') +
+        ' · 原生 bridge 已发现';
+    } else {
+      harnessStatusEl.textContent = (info.title ? 'HTTP API 可用 · ' + info.title : 'HTTP API 可用') +
+        ' · 未发现原生 bridge，将使用兼容模式';
+    }
   } catch (e) {
     harnessStatusEl.textContent = e && e.message ? e.message : '连接失败';
     harnessStatusEl.classList.add('error');

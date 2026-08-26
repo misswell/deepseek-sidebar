@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DeepSeek Sidebar",
-  "version": "1.9.4",
+  "version": "1.9.5",
   "description": "Open AI chat sites in Chrome sidebar and let a local DeepSeek Harness operate the current page",
   "permissions": [
     "sidePanel",
@@ -9,6 +9,8 @@
     "tabs",
     "storage",
     "scripting",
+    "debugger",
+    "webNavigation",
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess"
   ],
@@ -27,7 +29,7 @@
     "https://dict.youdao.com/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; frame-src http: https:"
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-src http: https:; connect-src 'self' http: https: ws: wss:"
   },
   "action": {
     "default_title": "Open AI Sidebar",
@@ -60,21 +62,15 @@
   "content_scripts": [
     {
       "matches": [
-        "https://chat.deepseek.com/*",
-        "https://chat.z.ai/*",
-        "https://chatgpt.com/*",
-        "https://gemini.google.com/*",
-        "https://www.kimi.com/*",
-        "https://kimi.com/*",
-        "https://www.qianwen.com/*",
-        "https://qianwen.com/*",
-        "https://dict.youdao.com/*"
+        "http://*/*",
+        "https://*/*"
       ],
       "js": [
-        "ai-input-fill.js"
+        "page-bridge.js"
       ],
       "run_at": "document_idle",
-      "all_frames": true
+      "all_frames": true,
+      "match_origin_as_fallback": true
     },
     {
       "matches": [
@@ -86,17 +82,6 @@
       ],
       "run_at": "document_start",
       "world": "MAIN",
-      "all_frames": true
-    },
-    {
-      "matches": [
-        "http://127.0.0.1/*",
-        "http://localhost/*"
-      ],
-      "js": [
-        "harness-embedded-bridge.js"
-      ],
-      "run_at": "document_start",
       "all_frames": true
     }
   ],

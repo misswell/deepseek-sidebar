@@ -13,7 +13,6 @@ const pageReaderStatus = document.getElementById('page-reader-status');
 const togglePageReaderBtn = document.getElementById('toggle-page-reader');
 const copyPageContentBtn = document.getElementById('copy-page-content');
 const closePageReaderBtn = document.getElementById('close-page-reader');
-const harnessEmbedShell = document.getElementById('harness-embed-shell');
 const harnessBridgeStatus = document.getElementById('harness-bridge-status');
 const harnessPanel = document.getElementById('harness-panel');
 const harnessState = document.getElementById('harness-state');
@@ -35,8 +34,9 @@ const APP_KEY = 'deepseek-sidebar-app';
 const VISIBILITY_KEY = 'deepseek-sidebar-visibility';
 const ORDER_KEY = 'deepseek-sidebar-order';
 const HARNESS_URL_KEY = 'deepseek-sidebar-harness-url';
+const HARNESS_TOKEN_KEY = 'deepseek-sidebar-harness-token';
 const HARNESS_SESSION_KEY = 'deepseek-sidebar-harness-session';
-const HARNESS_EMBEDDED_CONTENT_SCRIPT_ID = 'deepseek-sidebar-harness-embedded';
+const HARNESS_BRIDGE_SOURCE = 'deepseek-sidebar-harness-bridge';
 const ZOOM_STEP = 10;
 const ZOOM_MIN = 30;
 const ZOOM_MAX = 200;
@@ -76,11 +76,13 @@ let currentZoom = 100;
 let currentApp = null;
 let currentPageText = '';
 let currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
+let currentHarnessToken = '';
 let currentHarnessSessionId = '';
 let currentHarnessSnapshot = null;
 let harnessRunning = false;
 let harnessAbortController = null;
-let lastFillRequestId = 0;
+let nativeHarnessBridge = { state: 'stopped', connected: false, caps: null, error: '' };
+let harnessBridgePort = null;
 let pickingTabId = null;
 let pickCancelled = false;
 let pickWaitResolver = null;
@@ -185,7 +187,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
       currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
     }
     updateHarnessEndpoint();
-    if (currentApp === 'harness') activateHarnessFrame(true);
+    if (currentApp === 'harness') activateHarnessPanel(true);
+  }
+  if (changes[HARNESS_TOKEN_KEY]) {
+    currentHarnessToken = typeof changes[HARNESS_TOKEN_KEY].newValue === 'string'
+      ? changes[HARNESS_TOKEN_KEY].newValue : '';
+    if (currentApp === 'harness') activateHarnessPanel(true);
   }
   if (changes[HARNESS_SESSION_KEY]) {
     currentHarnessSessionId = changes[HARNESS_SESSION_KEY].newValue || '';
@@ -210,19 +217,7 @@ function hideLoadingIfStillWaiting(appId) {
 function setupFrameLoadState(frame, appId) {
   frame.addEventListener('load', () => {
     loadedApps.add(appId);
-    if (appId === 'harness') {
-      setHarnessBridgeStatus('Harness 界面已加载，等待当前页面桥接…', 'working');
-      try {
-        frame.contentWindow.postMessage({
-          source: 'deepseek-sidebar-harness-embedded',
-          type: 'configure'
-        }, '*');
-      } catch (error) {}
-    }
     if (currentApp === appId) loading.classList.add('hidden');
-  });
-  frame.addEventListener('error', () => {
-    if (appId === 'harness') setHarnessBridgeStatus('无法加载 Harness 服务页面。', 'error');
   });
 }
 
@@ -238,65 +233,11 @@ function getOrCreateFrame(appId) {
   frame.removeAttribute('sandbox');
   setupFrameLoadState(frame, appId);
   applyZoomToFrame(frame);
-  (appId === 'harness' ? harnessEmbedShell : webviewContainer).appendChild(frame);
+  webviewContainer.appendChild(frame);
   frames.set(appId, frame);
   if (appId !== 'harness') frame.src = app.url;
   hideLoadingIfStillWaiting(appId);
   return frame;
-}
-
-function getRegisteredHarnessBridge() {
-  return new Promise((resolve, reject) => {
-    chrome.scripting.getRegisteredContentScripts(
-      { ids: [HARNESS_EMBEDDED_CONTENT_SCRIPT_ID] },
-      scripts => {
-        const error = chrome.runtime.lastError;
-        if (error) {
-          reject(new Error(error.message));
-          return;
-        }
-        resolve(scripts || []);
-      }
-    );
-  });
-}
-
-function registerHarnessBridge(url) {
-  const matches = [DeepSeekHarnessProtocol.harnessOriginPattern(url)];
-  const registration = {
-    id: HARNESS_EMBEDDED_CONTENT_SCRIPT_ID,
-    matches,
-    js: ['harness-embedded-bridge.js'],
-    runAt: 'document_idle',
-    allFrames: true,
-    persistAcrossSessions: false
-  };
-
-  return getRegisteredHarnessBridge().then(existing => {
-    if (existing.length) {
-      return new Promise((resolve, reject) => {
-        chrome.scripting.updateRegisteredContentScripts([registration], () => {
-          const error = chrome.runtime.lastError;
-          if (error) reject(new Error(error.message));
-          else resolve();
-        });
-      });
-    }
-    return new Promise((resolve, reject) => {
-      chrome.scripting.registerContentScripts([registration], () => {
-        const error = chrome.runtime.lastError;
-        if (error) reject(new Error(error.message));
-        else resolve();
-      });
-    });
-  });
-}
-
-async function ensureHarnessEmbeddedBridge() {
-  if (!(await ensureHarnessServerPermission())) {
-    throw new Error('需要允许扩展访问 Harness 服务地址。');
-  }
-  await registerHarnessBridge(currentHarnessUrl);
 }
 
 function setHarnessBridgeStatus(message, state) {
@@ -318,25 +259,33 @@ function setHarnessBridgeStatus(message, state) {
   }
 }
 
-async function activateHarnessFrame(forceReload) {
-  try {
-    await ensureHarnessEmbeddedBridge();
-  } catch (error) {
-    setHarnessBridgeStatus(error && error.message ? error.message : 'Harness 桥接未启用', 'error');
-  }
+async function activateHarnessPanel(forceRefresh) {
   if (currentApp !== 'harness') return;
-
-  const frame = getOrCreateFrame('harness');
-  frame.classList.remove('hidden');
-  const targetUrl = currentHarnessUrl + '/';
-  const needsNavigation = forceReload || frame.dataset.harnessUrl !== currentHarnessUrl;
-  frame.dataset.harnessUrl = currentHarnessUrl;
-  if (needsNavigation || !frame.src || frame.src === 'about:blank') {
-    loadedApps.delete('harness');
-    loading.classList.remove('hidden');
-    frame.src = targetUrl;
-  } else if (loadedApps.has('harness')) {
-    loading.classList.add('hidden');
+  setHarnessBridgeStatus('正在连接原生浏览器工具…', 'working');
+  try {
+    const started = await sendHarnessBridgeCommand('start', {
+      baseUrl: currentHarnessUrl,
+      token: currentHarnessToken
+    });
+    applyHarnessBridgeStatus(started);
+    const connected = await waitForNativeHarnessBridge(forceRefresh ? 600 : 1800);
+    // Do not leave a reconnect loop running when this is an older Harness
+    // instance without the browser bridge. The HTTP compatibility path below
+    // remains available and the next refresh can try native mode again.
+    if (!connected) {
+      try {
+        const stopped = await sendHarnessBridgeCommand('stop');
+        applyHarnessBridgeStatus(stopped);
+      } catch (error) {}
+    }
+    await refreshHarnessPanel(Boolean(forceRefresh));
+  } catch (error) {
+    try {
+      const stopped = await sendHarnessBridgeCommand('stop');
+      applyHarnessBridgeStatus(stopped);
+    } catch (stopError) {}
+    setHarnessBridgeStatus(error && error.message ? error.message : 'Harness bridge 未启用', 'error');
+    await refreshHarnessPanel(true);
   }
 }
 
@@ -346,17 +295,14 @@ function switchApp(appId) {
   currentApp = appId;
   appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === appId));
   if (appId === 'harness') {
-    frames.forEach((item, id) => item.classList.toggle('hidden', id !== appId));
-    harnessEmbedShell.classList.remove('hidden');
+    frames.forEach(item => item.classList.add('hidden'));
     harnessPanel.classList.remove('hidden');
-    harnessPanel.classList.add('hidden');
-    loading.classList.remove('hidden');
+    loading.classList.add('hidden');
     updateHarnessEndpoint();
-    activateHarnessFrame();
+    activateHarnessPanel(false);
     try { chrome.storage.local.set({ [APP_KEY]: appId }); } catch (e) {}
     return;
   }
-  harnessEmbedShell.classList.add('hidden');
   harnessPanel.classList.add('hidden');
   getOrCreateFrame(appId);
   frames.forEach((item, id) => item.classList.toggle('hidden', id !== appId));
@@ -385,6 +331,134 @@ function setHarnessConnectionState(state, label) {
   if (state === 'connected' || state === 'error') harnessState.classList.add(state);
   harnessStateLabel.textContent = label;
 }
+
+function applyHarnessBridgeStatus(status) {
+  if (!status || status.source !== HARNESS_BRIDGE_SOURCE) return;
+  nativeHarnessBridge = {
+    state: status.state || 'stopped',
+    connected: status.connected === true,
+    caps: status.caps || null,
+    error: status.error || ''
+  };
+  if (nativeHarnessBridge.connected) {
+    setHarnessConnectionState('connected', '原生网页工具已连接');
+    setHarnessBridgeStatus('原生网页工具已就绪，模型会直接调用当前页面', 'done');
+  } else if (nativeHarnessBridge.state === 'connecting' || nativeHarnessBridge.state === 'reconnecting') {
+    setHarnessConnectionState('connecting', '正在连接网页工具…');
+    setHarnessBridgeStatus(nativeHarnessBridge.error || '正在连接 Harness 浏览器 bridge…', 'working');
+  } else if (nativeHarnessBridge.state === 'stopped' && nativeHarnessBridge.error) {
+    setHarnessConnectionState('error', '网页工具未连接');
+    setHarnessBridgeStatus(nativeHarnessBridge.error, 'error');
+  } else if (nativeHarnessBridge.state === 'stopped') {
+    setHarnessConnectionState('connecting', '等待原生网页工具');
+  }
+}
+
+function sendHarnessBridgeCommand(command, payload) {
+  return new Promise((resolve, reject) => {
+    const message = {
+      source: HARNESS_BRIDGE_SOURCE,
+      command,
+      ...(payload || {})
+    };
+    try {
+      chrome.runtime.sendMessage(message, response => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+        if (!response || response.ok !== true) {
+          reject(new Error(response && response.error ? response.error : 'Harness bridge 没有返回结果'));
+          return;
+        }
+        resolve(response.value);
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function sendNativeHarnessRpc(request) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let removeAbort = null;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      if (removeAbort) removeAbort();
+      callback(value);
+    };
+    const onAbort = () => {
+      const error = new Error('任务已停止');
+      error.name = 'AbortError';
+      finish(reject, error);
+    };
+    if (request.signal) {
+      if (request.signal.aborted) {
+        onAbort();
+        return;
+      }
+      request.signal.addEventListener('abort', onAbort, { once: true });
+      removeAbort = () => request.signal.removeEventListener('abort', onAbort);
+    }
+    try {
+      chrome.runtime.sendMessage({
+        source: HARNESS_BRIDGE_SOURCE,
+        command: 'rpc',
+        method: request.method,
+        payload: request.payload,
+        timeoutMs: request.timeoutMs
+      }, response => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          finish(reject, new Error(error.message));
+          return;
+        }
+        if (!response || response.ok !== true) {
+          finish(reject, new Error(response && response.error ? response.error : 'Harness bridge RPC 失败'));
+          return;
+        }
+        finish(resolve, response.value);
+      });
+    } catch (error) {
+      finish(reject, error);
+    }
+  });
+}
+
+function createNativeHarnessClient(options) {
+  return new DeepSeekHarnessClient(currentHarnessUrl, {
+    ...(options || {}),
+    transport: sendNativeHarnessRpc
+  });
+}
+
+async function waitForNativeHarnessBridge(timeoutMs) {
+  const deadline = Date.now() + (timeoutMs || 1800);
+  while (Date.now() < deadline) {
+    try {
+      const status = await sendHarnessBridgeCommand('status');
+      applyHarnessBridgeStatus(status);
+      if (status && status.connected) return true;
+    } catch (error) {}
+    await new Promise(resolve => setTimeout(resolve, 180));
+  }
+  return Boolean(nativeHarnessBridge.connected);
+}
+
+function connectHarnessBridgePort() {
+  try {
+    harnessBridgePort = chrome.runtime.connect({ name: HARNESS_BRIDGE_SOURCE });
+    harnessBridgePort.onMessage.addListener(applyHarnessBridgeStatus);
+    harnessBridgePort.onDisconnect.addListener(() => { harnessBridgePort = null; });
+  } catch (error) {
+    harnessBridgePort = null;
+  }
+}
+
+connectHarnessBridgePort();
 
 function setHarnessStatus(message, kind) {
   harnessStatus.textContent = message || '';
@@ -517,7 +591,9 @@ async function refreshHarnessConnection(silent) {
     const client = createHarnessClient({ timeoutMs: 6000 });
     const info = await client.describe();
     const model = info && (info.model || info.provider);
-    setHarnessConnectionState('connected', model ? '已连接 · ' + model : '已连接');
+    setHarnessConnectionState('connected', nativeHarnessBridge.connected
+      ? '原生网页工具已连接'
+      : model ? '兼容模式 · ' + model : '兼容模式已连接');
     if (!silent) setHarnessStatus('本地 Harness 已连接。', 'success');
     return info;
   } catch (error) {
@@ -529,6 +605,33 @@ async function refreshHarnessConnection(silent) {
 
 async function refreshHarnessPanel(silent) {
   updateHarnessEndpoint();
+  if (nativeHarnessBridge.connected) {
+    try {
+      const tab = await queryActiveTab();
+      if (unsupportedAutomationUrl(tab.url)) {
+        updateHarnessSnapshotCard(null);
+        harnessPageTitle.textContent = '此页面不允许扩展读取';
+        harnessSnapshotMeta.textContent = '请切换到普通 http/https 网页';
+        if (!silent) setHarnessStatus('当前 Chrome 系统页面不能被网页代理访问。', 'error');
+        return;
+      }
+      if (!(await ensureAutomationPermission(tab))) {
+        updateHarnessSnapshotCard(null);
+        harnessPageTitle.textContent = '等待网页访问权限';
+        harnessSnapshotMeta.textContent = '运行任务时可以再次授权';
+        return;
+      }
+      const snapshot = await getHarnessPageSnapshot(tab.id);
+      updateHarnessSnapshotCard(snapshot);
+      if (!silent) setHarnessStatus('原生网页工具已连接，页面快照已更新。', 'success');
+    } catch (error) {
+      updateHarnessSnapshotCard(null);
+      harnessPageTitle.textContent = '无法读取当前页面';
+      harnessSnapshotMeta.textContent = '点击刷新或运行任务重试';
+      if (!silent) setHarnessStatus(error && error.message ? error.message : '无法读取当前页面', 'error');
+    }
+    return;
+  }
   const connection = await refreshHarnessConnection(silent);
   if (!connection) return;
   try {
@@ -576,6 +679,36 @@ function stopHarnessTask() {
   setHarnessStatus('正在停止后续动作…');
 }
 
+async function runNativeHarnessTask(task, signal) {
+  const client = createNativeHarnessClient({
+    maxWaitMs: 90000,
+    timeoutMs: 20000
+  });
+  let sessionId = currentHarnessSessionId || '';
+  const cancelActiveSession = () => {
+    if (!sessionId) return;
+    void client.cancel(sessionId, { timeoutMs: 5000 }).catch(() => {});
+  };
+  signal.addEventListener('abort', cancelActiveSession, { once: true });
+  try {
+    await client.describe({ signal });
+    appendHarnessLog('原生工具模式：任务只发送给 Harness，页面由 browser_* 工具按需读取；当前标签页已固定。', 'result');
+    const response = await client.runPrompt(task, {
+      sessionId,
+      onSessionId: value => { sessionId = value; },
+      signal,
+      maxWaitMs: 90000
+    });
+    currentHarnessSessionId = response.sessionId;
+    try { chrome.storage.local.set({ [HARNESS_SESSION_KEY]: response.sessionId }); } catch (e) {}
+    if (response.text) appendHarnessLog(response.text, 'result');
+    setHarnessConnectionState('connected', '原生网页工具已连接');
+    setHarnessStatus(response.text || '任务已完成。', 'success');
+  } finally {
+    signal.removeEventListener('abort', cancelActiveSession);
+  }
+}
+
 async function runHarnessTask() {
   if (harnessRunning) {
     stopHarnessTask();
@@ -594,9 +727,10 @@ async function runHarnessTask() {
   harnessRunBtn.textContent = '停止任务';
   harnessRunBtn.disabled = false;
   harnessRefreshSnapshotBtn.disabled = true;
-  setHarnessStatus('正在读取当前页面…');
+  setHarnessStatus(nativeHarnessBridge.connected ? '正在启动原生网页工具…' : '正在读取当前页面…');
   harnessLogList.innerHTML = '';
   appendHarnessLog('任务：' + task);
+  let nativeTargetBound = false;
 
   try {
     if (!(await ensureHarnessServerPermission())) {
@@ -605,6 +739,12 @@ async function runHarnessTask() {
     const tab = await queryActiveTab();
     if (!(await ensureAutomationPermission(tab))) {
       throw new Error('需要允许扩展访问当前网页，才能读取和操作它。');
+    }
+    if (nativeHarnessBridge.connected) {
+      await sendHarnessBridgeCommand('bind', { tabId: tab.id });
+      nativeTargetBound = true;
+      await runNativeHarnessTask(task, signal);
+      return;
     }
     const snapshot = await getHarnessPageSnapshot(tab.id, signal);
     updateHarnessSnapshotCard(snapshot);
@@ -691,6 +831,9 @@ async function runHarnessTask() {
       setHarnessStatus(message, 'error');
     }
   } finally {
+    if (nativeTargetBound) {
+      try { await sendHarnessBridgeCommand('unbind'); } catch (error) {}
+    }
     harnessRunning = false;
     harnessAbortController = null;
     harnessRunBtn.textContent = '运行任务';
@@ -1029,36 +1172,6 @@ function showSelectedElement(result) {
   openPageReader(false);
 }
 
-function fillCurrentAppInput(text) {
-  if (!text) {
-    pageReaderStatus.textContent = '该元素没有可填充的文本';
-    return;
-  }
-
-  const frame = frames.get(currentApp);
-  if (!frame || !frame.contentWindow) {
-    pageReaderStatus.textContent = '当前 AI 页面尚未加载，无法填充输入框';
-    return;
-  }
-
-  lastFillRequestId++;
-  const requestId = lastFillRequestId;
-  frame.contentWindow.postMessage({
-    source: 'deepseek-sidebar',
-    type: 'fill-input',
-    requestId,
-    text
-  }, '*');
-
-  pageReaderStatus.textContent = pageReaderStatus.textContent + ' · 正在填充输入框...';
-
-  setTimeout(() => {
-    if (requestId === lastFillRequestId && pageReaderStatus.textContent.includes('正在填充输入框')) {
-      pageReaderStatus.textContent = pageReaderStatus.textContent.replace(' · 正在填充输入框...', ' · 未收到输入框响应');
-    }
-  }, 1200);
-}
-
 function showPageReaderError(message) {
   currentPageText = '';
   pageReaderTitle.textContent = '选择页面元素';
@@ -1192,7 +1305,6 @@ async function pickCurrentPageElement() {
       }
 
       showSelectedElement(value);
-      fillCurrentAppInput(currentPageText);
       break;
     }
   } finally {
@@ -1240,7 +1352,7 @@ configBtn.addEventListener('click', () => {
 });
 reloadBtn.addEventListener('click', () => {
   if (currentApp === 'harness') {
-    activateHarnessFrame(true);
+    activateHarnessPanel(true);
     return;
   }
   const frame = frames.get(currentApp);
@@ -1272,31 +1384,6 @@ document.addEventListener('keydown', (e) => {
   else if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); applyZoom(currentZoom - ZOOM_STEP); }
 });
 
-window.addEventListener('message', (event) => {
-  const data = event.data || {};
-  const harnessFrame = frames.get('harness');
-  if (data.source === 'deepseek-sidebar-harness-embedded' &&
-      harnessFrame && event.source === harnessFrame.contentWindow) {
-    if (data.type === 'ready') {
-      setHarnessBridgeStatus('当前标签页桥接已就绪', 'done');
-    } else if (data.type === 'status') {
-      setHarnessBridgeStatus(data.message || '', data.state || 'ready');
-    } else if (data.type === 'error') {
-      setHarnessBridgeStatus(data.message || '网页操作桥接失败', 'error');
-    }
-    return;
-  }
-  if (data.source !== 'deepseek-sidebar' || data.type !== 'fill-input-result') return;
-  const frame = frames.get(currentApp);
-  if (!frame || event.source !== frame.contentWindow) return;
-  if (data.requestId !== lastFillRequestId) return;
-
-  pageReaderStatus.textContent = pageReaderStatus.textContent.replace(
-    ' · 正在填充输入框...',
-    data.ok ? ' · 已填充输入框' : ' · 未找到输入框'
-  );
-});
-
 setTimeout(() => loading.classList.add('hidden'), 8000);
 
 // Restore saved state (last, in case storage API fails)
@@ -1307,11 +1394,19 @@ setTimeout(() => loading.classList.add('hidden'), 8000);
   let savedZoom = 100;
   try {
     const result = await new Promise((resolve, reject) => {
-      chrome.storage.local.get([ZOOM_KEY, APP_KEY, HARNESS_URL_KEY, HARNESS_SESSION_KEY], resolve);
+      chrome.storage.local.get([
+        ZOOM_KEY,
+        APP_KEY,
+        HARNESS_URL_KEY,
+        HARNESS_TOKEN_KEY,
+        HARNESS_SESSION_KEY
+      ], resolve);
     });
     savedApp = result[APP_KEY] || 'deepseek';
     savedZoom = result[ZOOM_KEY] || 100;
     currentHarnessUrl = DeepSeekHarnessProtocol.normalizeHarnessUrl(result[HARNESS_URL_KEY]);
+    currentHarnessToken = typeof result[HARNESS_TOKEN_KEY] === 'string'
+      ? result[HARNESS_TOKEN_KEY] : '';
     currentHarnessSessionId = result[HARNESS_SESSION_KEY] || '';
   } catch (e) {
     // use defaults

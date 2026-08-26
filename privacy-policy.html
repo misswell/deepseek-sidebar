@@ -14,7 +14,7 @@
 </head>
 <body>
   <h1>DeepSeek Sidebar 隐私政策</h1>
-  <p class="updated">最后更新：2026年6月18日</p>
+  <p class="updated">最后更新：2026年8月26日</p>
 
   <h2>概述</h2>
   <p>DeepSeek Sidebar（以下简称"本扩展"）尊重您的隐私。本扩展不向开发者或第三方分析服务收集、存储或传输个人数据。</p>
@@ -29,9 +29,9 @@
   </ul>
 
   <h2>本地存储</h2>
-  <p>本扩展使用 <code>chrome.storage.local</code> 在您的设备本地保存缩放比例偏好设置。该数据仅存储在您的浏览器中，不会发送到任何外部服务器。</p>
-  <p>当您点击选择页面元素按钮时，本扩展会在当前标签页中执行一次性脚本以读取选中元素的可见文本。文本会显示在本地侧边栏中，并填充到当前侧边栏 AI 网站的输入框；是否发送给该第三方网站由您自行决定。</p>
-  <p>当您主动在侧边栏运行 DeepSeek Harness 网页任务时，本扩展会读取当前页面的标题、网址、可见文本和交互元素，并发送到您在设置中填写的 Harness 地址。该地址可以是本机或您控制的局域网/远程服务；本扩展不会把这些内容发送到开发者的服务器。</p>
+  <p>本扩展使用 <code>chrome.storage.local</code> 在您的设备本地保存缩放比例、上次选择的应用、Harness 地址、可选 bridge token 和 Harness 会话编号。该数据仅存储在您的浏览器中，不会发送到扩展作者的服务器。</p>
+  <p>当您点击选择页面元素按钮时，本扩展会在当前标签页中执行一次性脚本以读取选中元素的可见文本。文本只显示在本地页面阅读器中，或由您主动复制；本扩展不会把选中内容填充到 DeepSeek、ChatGPT 或其他 AI 网站的输入框。</p>
+  <p>原生模式下，用户任务通过 WebSocket bridge 发送给您配置的 Harness；只有当 Harness 请求 <code>browser_snapshot</code>、<code>browser_get_text</code> 或其他浏览器工具时，扩展才读取当前页面并返回结构化文本。页面文本不会截图，也不会经过第三方 AI 网站的输入框。兼容模式下，页面快照会作为 API 请求的一部分发送到您配置的 Harness 地址。该地址可以是本机或您控制的局域网/远程服务；本扩展不会把这些内容发送到开发者的服务器。</p>
 
   <h2>第三方服务</h2>
   <p>本扩展在侧边栏中加载第三方 AI 聊天网站（DeepSeek、千问、智谱、Kimi、ChatGPT、Gemini）。这些网站由各自运营商独立运营，其自身的隐私政策适用于您在该网站上的活动。本扩展不控制也不负责这些网站的数据处理行为。</p>
@@ -42,8 +42,10 @@
     <li><strong>sidePanel</strong> — 在 Chrome 侧边栏中展示 AI 聊天站点</li>
     <li><strong>activeTab</strong> — 用户点击扩展后临时授权选择当前标签页中的页面元素</li>
     <li><strong>storage</strong> — 在本地保存缩放比例设置</li>
-    <li><strong>tabs</strong> — 查询当前标签页，并创建后台 Harness 宿主页面</li>
-    <li><strong>scripting</strong> — 点击选择按钮时向当前标签页注入一次性脚本，提取选中元素的可见文本</li>
+    <li><strong>tabs</strong> — 查询当前标签页，并在 HTTP 兼容模式下创建后台 Harness 宿主页面</li>
+    <li><strong>scripting</strong> — 为页面选择器和 Harness 的 browser 工具注入页面桥接脚本</li>
+    <li><strong>debugger</strong> — 为 Harness 提供受控的 Chrome DevTools Protocol 调用入口</li>
+    <li><strong>webNavigation</strong> — 枚举当前标签页的主文档与 iframe，让原生网页工具按 frame 路由</li>
     <li><strong>&lt;all_urls&gt;</strong> — 读取和操作当前普通网页，并访问您配置的 Harness 地址；安装或更新扩展时，请在 Chrome 权限提示中允许访问网站</li>
     <li><strong>declarativeNetRequest</strong> — 移除 X-Frame-Options / Content-Security-Policy 响应头，使 AI 聊天网站能在侧边栏 iframe 中正常加载</li>
     <li><strong>declarativeNetRequestWithHostAccess</strong> — 修改千问（qianwen.com）侧边栏 iframe 的请求头（User-Agent、sec-ch-ua-*），使其正确渲染移动版页面</li>

@@ -41,22 +41,26 @@ DeepSeek Sidebar 现在已经发布到 Chrome 应用商店：
 
 ![DeepSeek Sidebar 支持主流 AI 工具切换](https://blog.liuguofeng.com/wp-content/uploads/2026/06/03_mainstream_ai_in_sidebar_1280x800.webp)
 
-## 像 DevTools 一样选取页面内容，自动填充到 AI
+## 像 DevTools 一样选取页面内容
 
 DeepSeek Sidebar 还提供了一个很适合阅读、研究和写作的功能：选择页面元素。
 
-点击工具栏中的选择按钮后，你可以像使用 DevTools 一样在当前网页上移动鼠标，选择某个段落、卡片、文章区域或页面模块。确认选择后，扩展会提取该元素的可见文本，并自动填充到当前侧边栏 AI 的输入框中。
+点击工具栏中的选择按钮后，你可以像使用 DevTools 一样在当前网页上移动鼠标，选择某个段落、卡片、文章区域或页面模块。确认选择后，扩展会提取该元素的可见文本并显示在扩展自己的阅读器中，不会改写任何 AI 网站的输入框。
 
 这适合很多日常场景：
 
 - 让 AI 总结当前网页中的某段内容
-- 把商品说明、技术文档、新闻段落发送给 AI 分析
+- 把商品说明、技术文档、新闻段落复制给 AI 分析
 - 选中页面中的错误信息，让 AI 帮你排查
 - 提取网页中的文本，再交给 AI 改写、翻译或整理
 
 选中后还会显示一个页面内容阅读器，你可以展开查看完整文本，也可以一键复制到剪贴板。
 
-![选择页面元素并自动填充到 AI 输入框](https://blog.liuguofeng.com/wp-content/uploads/2026/06/04_element_select_autofill_1280x800.webp)
+![选择页面元素并在扩展阅读器中查看](https://blog.liuguofeng.com/wp-content/uploads/2026/06/04_element_select_autofill_1280x800.webp)
+
+## 连接本地 DeepSeek Harness 操作网页
+
+在设置中填写自己的 Harness 服务地址，例如 `http://127.0.0.1:3080/`。安装带 `/ext/bridge` 的 bridge 插件后，Harness 会通过 `browser_snapshot`、`browser_click`、`browser_type`、`browser_scroll` 和导航工具直接操作当前 Chrome 标签页。扩展自己读取页面并返回文本快照，页面内容不会被塞进 DeepSeek、ChatGPT 等网站的输入框；需要 DevTools 能力时，也可以使用受控的 Chrome DevTools Protocol 通道。
 
 ## 更适合长期放在侧边栏里的细节
 
@@ -72,7 +76,7 @@ DeepSeek Sidebar 还提供了一个很适合阅读、研究和写作的功能：
 
 DeepSeek Sidebar 不收集任何用户数据。
 
-扩展只会在本地保存缩放比例和上次选择的 AI 站点。选择页面元素时，脚本只在你主动点击按钮后临时注入当前标签页，用于读取你选中的元素文本。文本会显示在本地侧边栏中，并填充到当前 AI 网站的输入框；是否发送给第三方 AI 网站，由你自己决定。
+扩展会在本地保存缩放比例、上次选择的 AI 站点和 Harness 连接设置。选择页面元素时，脚本只在你主动点击按钮后临时注入当前标签页，用于读取你选中的元素文本；文本只显示在扩展阅读器中，或由你主动复制。原生 Harness 模式下，页面内容只在 Harness 请求浏览器工具时通过 bridge 返回。
 
 你也可以查看完整隐私政策：
 

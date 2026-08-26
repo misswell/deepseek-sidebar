@@ -113,22 +113,10 @@
 
     .webview-frame.hidden { display: none; }
 
-    .harness-embed-shell {
-      position: absolute;
-      inset: 0;
-      overflow: hidden;
-      background: #fff;
-      z-index: 2;
-    }
-
-    .harness-embed-shell.hidden { display: none; }
-
     .harness-bridge-status {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      z-index: 4;
-      max-width: calc(100% - 16px);
+      min-height: 15px;
+      margin-top: 10px;
+      max-width: 100%;
       padding: 4px 8px;
       border: 1px solid rgba(15, 23, 42, 0.12);
       border-radius: 999px;
@@ -623,9 +611,6 @@
     </div>
   </div>
   <div id="webview-container">
-    <div class="harness-embed-shell hidden" id="harness-embed-shell">
-      <div class="harness-bridge-status" id="harness-bridge-status" aria-live="polite"></div>
-    </div>
     <div class="harness-panel hidden" id="harness-panel">
       <div class="harness-hero">
         <div class="harness-connection">
@@ -635,8 +620,9 @@
           </div>
           <span class="harness-kicker">local web operator</span>
         </div>
+        <div class="harness-bridge-status" id="harness-bridge-status" aria-live="polite"></div>
         <h1>把当前页面交给 DeepSeek</h1>
-        <p>读取当前标签页的可见内容与交互元素，再由本地 Harness 规划并执行浏览器动作。</p>
+        <p>扩展通过原生 bridge 读取当前标签页；运行任务时会固定这个标签页。页面内容不会被塞进 DeepSeek 网页输入框，模型按需调用浏览器工具。</p>
         <div class="harness-endpoint-row">
           <code class="harness-endpoint" id="harness-endpoint">http://127.0.0.1:3080</code>
           <button id="harness-open" type="button">打开 Harness ↗</button>
@@ -662,7 +648,7 @@
       <div class="harness-controls">
         <label class="harness-auto-run" for="harness-auto-run">
           <input id="harness-auto-run" type="checkbox" checked>
-          <span>自动执行模型动作</span>
+          <span>兼容模式自动执行模型动作</span>
         </label>
         <button id="harness-run" type="button">运行任务</button>
       </div>
@@ -671,7 +657,7 @@
       <div class="harness-log">
         <div class="harness-log-title">execution log</div>
         <div class="harness-log-list" id="harness-log-list">
-          <div class="harness-log-item">输入任务后，扩展会先读取当前页面，再把结构化动作交给 Chrome 执行。</div>
+          <div class="harness-log-item">输入任务后，Harness 会通过 browser_* 工具按需读取并操作当前页面。</div>
         </div>
       </div>
     </div>

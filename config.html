@@ -178,7 +178,8 @@
       margin-top: 7px;
     }
 
-    #harnessUrl {
+    #harnessUrl,
+    #harnessToken {
       min-width: 0;
       flex: 1;
       border: 1px solid #37645d;
@@ -190,9 +191,15 @@
       font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     }
 
-    #harnessUrl:focus {
+    #harnessUrl:focus,
+    #harnessToken:focus {
       border-color: #6ee7b7;
       box-shadow: 0 0 0 3px rgba(110, 231, 183, 0.1);
+    }
+
+    .harness-token-row {
+      display: flex;
+      margin-top: 7px;
     }
 
     .btn-test {
@@ -240,7 +247,11 @@
       <input id="harnessUrl" type="url" inputmode="url" spellcheck="false" placeholder="http://127.0.0.1:3080/">
       <button class="btn-test" id="testHarnessBtn" type="button">测试连接</button>
     </div>
-    <p class="harness-hint">默认地址为 http://127.0.0.1:3080/。自定义远程地址时，Chrome 会单独请求该站点的访问权限。</p>
+    <label class="harness-label" for="harnessToken">Bridge token（可选）</label>
+    <div class="harness-token-row">
+      <input id="harnessToken" type="password" autocomplete="off" spellcheck="false" placeholder="本机 Chrome 通常可留空">
+    </div>
+    <p class="harness-hint">默认地址为 http://127.0.0.1:3080/。本机 Chrome bridge 通常无需 token；远程或 Firefox bridge 请填入服务端 token。页面内容只通过原生 bridge 的浏览器工具按需读取。</p>
     <div class="harness-status" id="harnessStatus"></div>
   </section>
   <div class="app-list" id="appList"></div>

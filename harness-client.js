@@ -81,6 +81,7 @@
           baseUrl: this.baseUrl,
           method,
           payload: payload || {},
+          timeoutMs: config.timeoutMs || this.timeoutMs,
           signal: controller.signal
         });
         return protocol.unwrapRpcResponse(raw);
@@ -117,6 +118,10 @@
         mode: 'queue',
         content: [{ type: 'text', text: String(text || '') }]
       }, options);
+    }
+
+    cancel(sessionId, options) {
+      return this.request('session.cancel', { sessionId }, options);
     }
 
     async ensureSession(sessionId, options) {
@@ -182,6 +187,7 @@
     async runPrompt(text, options) {
       const config = options || {};
       const sessionId = await this.ensureSession(config.sessionId, config);
+      if (typeof config.onSessionId === 'function') config.onSessionId(sessionId);
       const before = await this.history(sessionId, config);
       const afterSeq = protocol.maxEventSeq(before && before.events);
       await this.prompt(sessionId, text, config);

@@ -6,7 +6,27 @@
   }
 })(typeof globalThis !== 'undefined' ? globalThis : window, function createHarnessProtocol() {
   const DEFAULT_HARNESS_URL = 'http://127.0.0.1:3080';
+  const BRIDGE_PATH = '/ext/bridge';
+  const BRIDGE_CONFIG_PATH = '/ext/bridge-config';
+  const DEFAULT_SNAPSHOT_MAX_CHARS = 32000;
+  const DEFAULT_MAX_INTERACTIVE_ITEMS = 60;
+  const MIN_SNAPSHOT_MAX_CHARS = 500;
   const MAX_ACTIONS = 8;
+  const BRIDGE_TOOL_NAMES = [
+    'browser_snapshot',
+    'browser_click',
+    'browser_type',
+    'browser_press',
+    'browser_scroll',
+    'browser_navigate',
+    'browser_back',
+    'browser_forward',
+    'browser_reload',
+    'browser_get_text',
+    'browser_wait',
+    'browser_cdp',
+    'tab_cdp_call'
+  ];
   const ALLOWED_ACTIONS = new Set([
     'back',
     'click',
@@ -58,6 +78,98 @@
       throw new Error('无效的 Harness API 方法');
     }
     return base + '/api/' + safeMethod;
+  }
+
+  function harnessBridgeConfigUrl(baseUrl) {
+    return normalizeHarnessUrl(baseUrl) + BRIDGE_CONFIG_PATH;
+  }
+
+  function harnessBridgeWebSocketUrl(baseUrl) {
+    const url = new URL(normalizeHarnessUrl(baseUrl));
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.pathname = url.pathname.replace(/\/+$/, '') + BRIDGE_PATH;
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  }
+
+  function bridgeCaps(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    return value.textOnly === true &&
+      Number.isInteger(value.snapshotMaxChars) && value.snapshotMaxChars >= MIN_SNAPSHOT_MAX_CHARS &&
+      Number.isInteger(value.maxInteractiveItems) && value.maxInteractiveItems > 0;
+  }
+
+  function wireError(value) {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value) &&
+      typeof value.code === 'string' && typeof value.message === 'string');
+  }
+
+  function parseBridgeFrame(text) {
+    let value;
+    try {
+      value = JSON.parse(String(text || ''));
+    } catch (error) {
+      return undefined;
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.t !== 'string') {
+      return undefined;
+    }
+
+    switch (value.t) {
+      case 'hello.ok':
+        return bridgeCaps(value.caps) ? { t: value.t, caps: value.caps } : undefined;
+      case 'rpc.result':
+        if (typeof value.id !== 'string') return undefined;
+        if (value.ok === true && Object.prototype.hasOwnProperty.call(value, 'result')) {
+          return { t: value.t, id: value.id, ok: true, result: value.result };
+        }
+        return wireError(value.error)
+          ? { t: value.t, id: value.id, ok: false, error: value.error }
+          : undefined;
+      case 'respond.result':
+        if (typeof value.id !== 'string') return undefined;
+        if (value.ok === true && Object.prototype.hasOwnProperty.call(value, 'result')) {
+          return { t: value.t, id: value.id, ok: true, result: value.result };
+        }
+        return wireError(value.error)
+          ? { t: value.t, id: value.id, ok: false, error: value.error }
+          : undefined;
+      case 'event':
+        return value.frame && typeof value.frame === 'object' && !Array.isArray(value.frame)
+          ? { t: value.t, frame: value.frame }
+          : undefined;
+      case 'tool.call':
+        return typeof value.id === 'string' && typeof value.name === 'string' &&
+          value.args && typeof value.args === 'object' && !Array.isArray(value.args) &&
+          typeof value.expiresAt === 'number' && Number.isFinite(value.expiresAt) && value.expiresAt > 0 &&
+          (value.sessionId === undefined || (typeof value.sessionId === 'string' && value.sessionId.trim() !== ''))
+          ? {
+            t: value.t,
+            id: value.id,
+            name: value.name,
+            args: value.args,
+            expiresAt: value.expiresAt,
+            ...(value.sessionId === undefined ? {} : { sessionId: value.sessionId })
+          }
+          : undefined;
+      case 'tool.cancel':
+        return typeof value.id === 'string' ? { t: value.t, id: value.id } : undefined;
+      case 'ping':
+        return { t: value.t };
+      case 'error':
+        return typeof value.code === 'string' && typeof value.message === 'string'
+          ? { t: value.t, code: value.code, message: value.message }
+          : undefined;
+      default:
+        return undefined;
+    }
+  }
+
+  function isServerBridgeFrame(frame) {
+    return Boolean(frame && typeof frame === 'object' && [
+      'hello.ok', 'rpc.result', 'respond.result', 'event', 'tool.call', 'tool.cancel', 'ping', 'error'
+    ].includes(frame.t));
   }
 
   function createRpcEnvelope(method, payload, rpcId) {
@@ -313,20 +425,30 @@
 
   return {
     ALLOWED_ACTIONS,
+    BRIDGE_CONFIG_PATH,
+    BRIDGE_PATH,
+    BRIDGE_TOOL_NAMES,
+    DEFAULT_MAX_INTERACTIVE_ITEMS,
+    DEFAULT_SNAPSHOT_MAX_CHARS,
     DEFAULT_HARNESS_URL,
     MAX_ACTIONS,
+    MIN_SNAPSHOT_MAX_CHARS,
     actionLabel,
     buildBrowserTaskPrompt,
     createRpcEnvelope,
     eventType,
     extractAssistantText,
     extractJsonCandidates,
+    harnessBridgeConfigUrl,
+    harnessBridgeWebSocketUrl,
     harnessApiUrl,
     harnessOriginPattern,
     isAfterSeq,
+    isServerBridgeFrame,
     maxEventSeq,
     normalizeAction,
     normalizeHarnessUrl,
+    parseBridgeFrame,
     parseBrowserActionResponse,
     textFromContent,
     unwrapRpcResponse
