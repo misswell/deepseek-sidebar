@@ -68,6 +68,7 @@ let currentTabId = null;
 let currentWindowId = null;
 let currentPageText = '';
 let currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
+let configuredHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
 let currentHarnessToken = '';
 let nativeHarnessBridge = { state: 'stopped', connected: false, caps: null, error: '' };
 let harnessBridgePort = null;
@@ -84,6 +85,10 @@ let tabStateStorageWrite = Promise.resolve();
 let tabLifecycleReady = false;
 let pendingActiveTab = null;
 let tabActivationQueue = Promise.resolve();
+let harnessUrlDiscoveryPromise = null;
+let harnessUrlDiscoveryTarget = '';
+let lastHarnessUrlDiscoveryAt = 0;
+const HARNESS_URL_DISCOVERY_TTL_MS = 3000;
 const appSwitcher = document.getElementById('appSwitcher');
 const configBtn = document.getElementById('config-btn');
 let appButtons = [];  // populated dynamically by renderAppButtons()
@@ -337,6 +342,54 @@ function resetAppFrames(appId) {
   queueTabStateStorageWrite();
 }
 
+function setEffectiveHarnessUrl(url, render) {
+  let normalized;
+  try {
+    normalized = DeepSeekHarnessProtocol.normalizeHarnessUrl(url);
+  } catch (error) {
+    return false;
+  }
+  if (normalized === currentHarnessUrl) return false;
+  currentHarnessUrl = normalized;
+  if (tabLifecycleReady) {
+    resetAppFrames('harness');
+    if (render !== false && currentApp === 'harness') renderCurrentApp();
+  }
+  return true;
+}
+
+function resolveConfiguredHarnessUrl(options) {
+  const config = options || {};
+  if (!DeepSeekHarnessProtocol.isLocalHarnessDiscoveryTarget(configuredHarnessUrl)) {
+    return Promise.resolve(currentHarnessUrl);
+  }
+  const now = Date.now();
+  if (!config.force && harnessUrlDiscoveryTarget === configuredHarnessUrl &&
+      now - lastHarnessUrlDiscoveryAt < HARNESS_URL_DISCOVERY_TTL_MS) {
+    return Promise.resolve(currentHarnessUrl);
+  }
+  if (harnessUrlDiscoveryPromise && harnessUrlDiscoveryTarget === configuredHarnessUrl) {
+    return harnessUrlDiscoveryPromise;
+  }
+
+  const target = configuredHarnessUrl;
+  const request = sendHarnessBridgeCommand('resolve', { baseUrl: target });
+  harnessUrlDiscoveryTarget = target;
+  harnessUrlDiscoveryPromise = request.then(result => {
+    if (target !== configuredHarnessUrl || !result || typeof result.baseUrl !== 'string') {
+      return currentHarnessUrl;
+    }
+    setEffectiveHarnessUrl(result.baseUrl);
+    return currentHarnessUrl;
+  }).catch(() => currentHarnessUrl).finally(() => {
+    if (harnessUrlDiscoveryTarget === target) {
+      lastHarnessUrlDiscoveryAt = Date.now();
+      harnessUrlDiscoveryPromise = null;
+    }
+  });
+  return harnessUrlDiscoveryPromise;
+}
+
 function isHarnessFrameUrl(url) {
   try {
     const base = new URL(currentHarnessUrl);
@@ -406,6 +459,7 @@ function activateTab(tabId, windowId) {
   const id = numericTabId(tabId);
   if (id === null) return;
   if (currentTabId === id && (windowId === undefined || currentWindowId === windowId)) return;
+  const changedTab = currentTabId !== id;
 
   if (pickingTabId !== null && pickingTabId !== id) {
     pickCancelled = true;
@@ -421,6 +475,7 @@ function activateTab(tabId, windowId) {
   if (state) currentApp = state.app;
   renderAppButtons();
   renderCurrentApp();
+  if (changedTab && currentApp === 'harness') void resolveConfiguredHarnessUrl();
 }
 
 function forgetTabState(tabId) {
@@ -597,16 +652,16 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderAppButtons();
   }
   if (changes[HARNESS_URL_KEY]) {
-    const previousHarnessUrl = currentHarnessUrl;
+    let nextHarnessUrl;
     try {
-      currentHarnessUrl = DeepSeekHarnessProtocol.normalizeHarnessUrl(changes[HARNESS_URL_KEY].newValue);
+      nextHarnessUrl = DeepSeekHarnessProtocol.normalizeHarnessUrl(changes[HARNESS_URL_KEY].newValue);
     } catch (e) {
-      currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
+      nextHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
     }
-    if (currentHarnessUrl !== previousHarnessUrl) {
-      resetAppFrames('harness');
-      if (currentApp === 'harness') renderCurrentApp();
-    }
+    configuredHarnessUrl = nextHarnessUrl;
+    const effectiveUrlChanged = setEffectiveHarnessUrl(nextHarnessUrl);
+    if (effectiveUrlChanged && currentApp === 'harness' && !tabLifecycleReady) renderCurrentApp();
+    void resolveConfiguredHarnessUrl({ force: true });
   }
   if (changes[HARNESS_TOKEN_KEY]) {
     currentHarnessToken = typeof changes[HARNESS_TOKEN_KEY].newValue === 'string'
@@ -736,7 +791,13 @@ async function activateHarnessBridge(tabId) {
       token: currentHarnessToken
     });
     if (!isActive()) return;
+    const effectiveUrlChanged = started && typeof started.baseUrl === 'string'
+      ? setEffectiveHarnessUrl(started.baseUrl, false) : false;
     applyHarnessBridgeStatus(started);
+    if (effectiveUrlChanged && isActive()) {
+      hideAllFrames();
+      renderFrameApp('harness', targetTabId);
+    }
     const connected = await waitForNativeHarnessBridge(1800);
     if (!isActive()) return;
     if (!connected) {
@@ -1500,12 +1561,14 @@ setTimeout(() => loading.classList.add('hidden'), 8000);
   }
   const result = await readLocalStorage([HARNESS_URL_KEY, HARNESS_TOKEN_KEY]);
   try {
-    currentHarnessUrl = DeepSeekHarnessProtocol.normalizeHarnessUrl(result[HARNESS_URL_KEY]);
+    configuredHarnessUrl = DeepSeekHarnessProtocol.normalizeHarnessUrl(result[HARNESS_URL_KEY]);
   } catch (e) {
-    currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
+    configuredHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
   }
+  currentHarnessUrl = configuredHarnessUrl;
   currentHarnessToken = typeof result[HARNESS_TOKEN_KEY] === 'string'
     ? result[HARNESS_TOKEN_KEY] : '';
+  await resolveConfiguredHarnessUrl({ force: true });
   await loadPanelStateStore(initialTab && initialTab.id);
   tabLifecycleReady = true;
   const pending = pendingActiveTab;

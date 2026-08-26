@@ -6,6 +6,8 @@
   }
 })(typeof globalThis !== 'undefined' ? globalThis : window, function createHarnessProtocol() {
   const DEFAULT_HARNESS_URL = 'http://127.0.0.1:3080';
+  const LOCAL_HARNESS_PORT_MIN = 3080;
+  const LOCAL_HARNESS_PORT_MAX = 3099;
   const BRIDGE_PATH = '/ext/bridge';
   const BRIDGE_CONFIG_PATH = '/ext/bridge-config';
   const DEFAULT_SNAPSHOT_MAX_CHARS = 32000;
@@ -64,6 +66,36 @@
     url.search = '';
     url.pathname = url.pathname.replace(/\/+$/, '');
     return url.toString().replace(/\/$/, '');
+  }
+
+  function isLocalHarnessDiscoveryTarget(value) {
+    try {
+      const url = new URL(normalizeHarnessUrl(value));
+      return url.protocol === 'http:' &&
+        (url.hostname === '127.0.0.1' || url.hostname === 'localhost') &&
+        url.port === String(LOCAL_HARNESS_PORT_MIN) &&
+        (!url.pathname || url.pathname === '/');
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function localHarnessCandidateUrls(value) {
+    const normalized = normalizeHarnessUrl(value);
+    if (!isLocalHarnessDiscoveryTarget(normalized)) return [];
+    const base = new URL(normalized);
+    const candidates = [];
+    for (let port = LOCAL_HARNESS_PORT_MIN; port <= LOCAL_HARNESS_PORT_MAX; port += 1) {
+      base.port = String(port);
+      candidates.push(base.toString().replace(/\/$/, ''));
+    }
+    return candidates;
+  }
+
+  function isDeepSeekHarnessPage(value) {
+    const html = String(value || '').slice(0, 200000);
+    return /__DSH_BOOT__/.test(html) ||
+      /<title[^>]*>\s*DeepSeek Harness\s*<\/title>/i.test(html);
   }
 
   function harnessOriginPattern(value) {
@@ -430,6 +462,8 @@
     BRIDGE_TOOL_NAMES,
     DEFAULT_MAX_INTERACTIVE_ITEMS,
     DEFAULT_SNAPSHOT_MAX_CHARS,
+    LOCAL_HARNESS_PORT_MIN,
+    LOCAL_HARNESS_PORT_MAX,
     DEFAULT_HARNESS_URL,
     MAX_ACTIONS,
     MIN_SNAPSHOT_MAX_CHARS,
@@ -443,6 +477,9 @@
     harnessBridgeWebSocketUrl,
     harnessApiUrl,
     harnessOriginPattern,
+    isDeepSeekHarnessPage,
+    isLocalHarnessDiscoveryTarget,
+    localHarnessCandidateUrls,
     isAfterSeq,
     isServerBridgeFrame,
     maxEventSeq,

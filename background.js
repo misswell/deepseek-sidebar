@@ -1,4 +1,4 @@
-importScripts('harness-protocol.js', 'harness-bridge-client.js');
+importScripts('harness-protocol.js', 'harness-discovery.js', 'harness-bridge-client.js');
 
 const PAGE_BRIDGE_FILE = 'page-bridge.js';
 const HARNESS_HOST_BRIDGE_FILE = 'harness-host-bridge.js';
@@ -6,9 +6,11 @@ const HARNESS_BRIDGE_SOURCE = 'deepseek-sidebar-harness-bridge';
 const HARNESS_URL_KEY = 'deepseek-sidebar-harness-url';
 const HARNESS_TOKEN_KEY = 'deepseek-sidebar-harness-token';
 const harnessHostTabPromises = new Map();
+const harnessDiscoveryPromises = new Map();
 const harnessBridgePorts = new Set();
 let harnessBridgeClient = null;
 let harnessBridgeUrl = '';
+let harnessBaseUrl = '';
 let harnessBridgeError = '';
 let harnessTargetTabId = null;
 
@@ -19,6 +21,7 @@ function harnessBridgeStatus() {
     state: harnessBridgeClient ? harnessBridgeClient.state : 'stopped',
     connected: Boolean(harnessBridgeClient && harnessBridgeClient.connected),
     url: harnessBridgeUrl,
+    baseUrl: harnessBaseUrl,
     error: harnessBridgeError,
     caps: harnessBridgeClient ? harnessBridgeClient.caps : null,
     targetTabId: harnessTargetTabId
@@ -86,25 +89,22 @@ function makeHarnessBridgeError(code, message) {
   return error;
 }
 
-function fetchBridgeConfig(baseUrl) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 1800);
-  return fetch(DeepSeekHarnessProtocol.harnessBridgeConfigUrl(baseUrl), {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-    signal: controller.signal
-  }).then(async response => {
-    if (!response.ok) return null;
-    let body;
-    try { body = await response.json(); } catch (error) { return null; }
-    return body && typeof body.wsUrl === 'string' ? body.wsUrl : null;
-  }).catch(() => null).finally(() => clearTimeout(timeoutId));
+function discoverHarnessService(baseUrl) {
+  const normalized = DeepSeekHarnessProtocol.normalizeHarnessUrl(baseUrl);
+  if (harnessDiscoveryPromises.has(normalized)) {
+    return harnessDiscoveryPromises.get(normalized);
+  }
+  const pending = DeepSeekHarnessDiscovery.discover(normalized).finally(() => {
+    harnessDiscoveryPromises.delete(normalized);
+  });
+  harnessDiscoveryPromises.set(normalized, pending);
+  return pending;
 }
 
 async function resolveHarnessBridgeUrl(baseUrl) {
-  const normalized = DeepSeekHarnessProtocol.normalizeHarnessUrl(baseUrl);
-  const discovered = await fetchBridgeConfig(normalized);
-  const candidate = discovered || DeepSeekHarnessProtocol.harnessBridgeWebSocketUrl(normalized);
+  const service = await discoverHarnessService(baseUrl);
+  const candidate = service.bridgeUrl ||
+    DeepSeekHarnessProtocol.harnessBridgeWebSocketUrl(service.baseUrl);
   let url;
   try { url = new URL(candidate); } catch (error) {
     throw new Error('Harness bridge 地址无效');
@@ -113,7 +113,13 @@ async function resolveHarnessBridgeUrl(baseUrl) {
     throw new Error('Harness bridge 只支持 ws 或 wss 地址');
   }
   url.hash = '';
-  return { url: url.toString().replace(/\/$/, ''), discovered: Boolean(discovered) };
+  return {
+    url: url.toString().replace(/\/$/, ''),
+    baseUrl: service.baseUrl,
+    discovered: Boolean(service.bridgeUrl),
+    pageDetected: service.pageDetected,
+    detected: service.detected
+  };
 }
 
 function createHarnessBridgeClient() {
@@ -150,6 +156,7 @@ async function startHarnessBridge(baseUrl, token) {
   unbindHarnessTarget();
   const client = createHarnessBridgeClient();
   harnessBridgeUrl = resolved.url;
+  harnessBaseUrl = resolved.baseUrl;
   harnessBridgeError = resolved.discovered ? '' : '未发现 /ext/bridge-config，正在尝试标准 bridge 地址';
   client.start(resolved.url, token || '');
   return harnessBridgeStatus();
@@ -211,6 +218,7 @@ async function testHarnessBridgeConnection(baseUrl, token) {
     state: 'connected',
     connected: true,
     url: resolved.url,
+    baseUrl: resolved.baseUrl,
     error: '',
     caps: result.caps || null,
     targetTabId: null,
@@ -220,6 +228,7 @@ async function testHarnessBridgeConnection(baseUrl, token) {
 
 function stopHarnessBridge() {
   harnessBridgeUrl = '';
+  harnessBaseUrl = '';
   harnessBridgeError = '';
   unbindHarnessTarget();
   if (harnessBridgeClient) harnessBridgeClient.stop();
@@ -711,12 +720,14 @@ async function ensureHarnessHostTab(baseUrl) {
 }
 
 async function proxyHarnessRpc(message) {
-  const base = new URL(message.baseUrl);
+  const requestedBase = new URL(message.baseUrl);
   const method = String(message.method || '').replace(/^\/+|\/+$/g, '');
-  if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password ||
+  if (!['http:', 'https:'].includes(requestedBase.protocol) || requestedBase.username || requestedBase.password ||
       !method || method.includes('..')) {
     throw new Error('Harness RPC 参数无效');
   }
+  const discovered = await discoverHarnessService(requestedBase.toString());
+  const base = new URL(discovered.baseUrl);
   const basePath = base.pathname.replace(/\/+$/, '');
   const apiPath = basePath + '/api/' + method;
   const tabId = await ensureHarnessHostTab(base.toString());
@@ -763,7 +774,8 @@ async function proxyHarnessProbe(message) {
   if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password) {
     throw new Error('Harness 地址只能使用 http 或 https');
   }
-  const tabId = await ensureHarnessHostTab(base.toString());
+  const discovered = await discoverHarnessService(base.toString());
+  const tabId = await ensureHarnessHostTab(discovered.baseUrl);
   const response = await sendTabMessage(tabId, {
     source: 'deepseek-sidebar-harness-host-page',
     command: 'probe'

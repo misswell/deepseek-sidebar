@@ -25,6 +25,11 @@
 - **请求头修改** — 自动移除 X-Frame-Options / Content-Security-Policy 响应头，使 AI 站点可在侧边栏 iframe 中加载
 - **简洁工具栏** — 深色主题，不干扰对话体验
 
+## 1.9.10
+
+- 默认本机地址不可用时，自动扫描 `3080–3099` 并加载实际运行的 DSH 页面，例如 DSH 自动切换到 `http://127.0.0.1:3081/`
+- 端口发现同时复用原生 bridge 地址；明确填写的远程地址或自定义端口保持不变
+
 ## 1.9.8
 
 - 设置页的连接测试改为真实完成 WebSocket `hello.ok` 握手，不再把 `/ext/bridge-config` 的 200 响应误当作 bridge 可用
@@ -101,6 +106,7 @@
 ├── background.js           # Service Worker，处理图标点击打开侧边栏
 ├── harness-client.js       # Harness session RPC 客户端与轮询
 ├── harness-protocol.js     # Harness RPC、动作解析和任务提示词
+├── harness-discovery.js    # 默认本机 DSH 端口和页面/bridge 自动发现
 ├── harness-bridge-client.js # 原生 WebSocket bridge、握手、重连和工具回传
 ├── harness-extension-transport.js # 通过 Harness 同源宿主页转发扩展 RPC
 ├── harness-host-bridge.js  # 在 Harness 同源页面内转发 API 请求，避免放宽服务端 CORS

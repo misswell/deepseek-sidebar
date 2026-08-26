@@ -20,6 +20,10 @@ test('normalizes Harness URLs without changing the host or port', () => {
   assert.equal(protocol.DEFAULT_HARNESS_URL, 'http://127.0.0.1:3080');
   assert.equal(protocol.normalizeHarnessUrl('http://127.0.0.1:3080/'), 'http://127.0.0.1:3080');
   assert.equal(protocol.normalizeHarnessUrl('https://example.test/harness///'), 'https://example.test/harness');
+  assert.equal(protocol.isLocalHarnessDiscoveryTarget('http://127.0.0.1:3080/'), true);
+  assert.equal(protocol.isLocalHarnessDiscoveryTarget('http://localhost:3080/'), true);
+  assert.equal(protocol.isLocalHarnessDiscoveryTarget('http://127.0.0.1:3081/'), false);
+  assert.equal(protocol.localHarnessCandidateUrls('http://127.0.0.1:3080/').length, 20);
   assert.throws(() => protocol.normalizeHarnessUrl('javascript:alert(1)'), /http 或 https/);
 });
 
@@ -390,6 +394,8 @@ test('routes the side panel state by browser tab like the Codex side panel', () 
   assert.match(fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8'), /tab-state\.js/);
   assert.match(background, /chrome\.sidePanel\.open\(target\)/);
   assert.match(background, /\{ windowId: tab\.windowId \}/);
+  assert.match(background, /harness-discovery\.js/);
+  assert.match(sidepanel, /resolveConfiguredHarnessUrl/);
 });
 
 test('opens the real local Harness conversation page and restores its route per tab', () => {
