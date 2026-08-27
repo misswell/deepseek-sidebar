@@ -396,6 +396,8 @@ test('routes the side panel state by browser tab like the Codex side panel', () 
   assert.match(background, /\{ windowId: tab\.windowId \}/);
   assert.match(background, /harness-discovery\.js/);
   assert.match(sidepanel, /resolveConfiguredHarnessUrl/);
+  assert.match(sidepanel, /createActiveTabSynchronizer/);
+  assert.match(sidepanel, /ACTIVE_TAB_SYNC_INTERVAL_MS/);
 });
 
 test('opens the real local Harness conversation page and restores its route per tab', () => {

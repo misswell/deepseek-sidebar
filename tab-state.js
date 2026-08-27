@@ -113,6 +113,30 @@
     return result;
   }
 
+  function createActiveTabSynchronizer(options) {
+    const config = options || {};
+    let pending = null;
+
+    function reconcile() {
+      if (pending) return pending;
+      pending = Promise.resolve()
+        .then(() => config.getActiveTab())
+        .then(tab => {
+          const activeKey = tabKey(tab && tab.id);
+          if (activeKey === null) return false;
+          const currentKey = tabKey(config.getCurrentTabId());
+          if (activeKey === currentKey) return false;
+          return Promise.resolve(config.onActivate(tab)).then(() => true);
+        })
+        .finally(() => {
+          pending = null;
+        });
+      return pending;
+    }
+
+    return { reconcile };
+  }
+
   const api = {
     DEFAULT_APP,
     DEFAULT_ZOOM,
@@ -129,7 +153,8 @@
     getFrameUrl,
     setFrameUrl,
     removeTabState,
-    replaceTabState
+    replaceTabState,
+    createActiveTabSynchronizer
   };
 
   if (typeof module === 'object' && module && module.exports) module.exports = api;

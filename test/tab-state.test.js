@@ -61,3 +61,36 @@ test('removes closed tabs and migrates state when Chrome replaces a tab', () => 
   map = state.removeTabState(map, 33);
   assert.equal(state.getTabState(map, 33), null);
 });
+
+test('reconciles the active tab when a tab activation event was missed', async () => {
+  let currentTabId = 11;
+  let activeTab = { id: 11, windowId: 7 };
+  let map = state.setTabState({}, 11, { app: 'chatgpt', zoom: 80 });
+  map = state.setTabState(map, 22, { app: 'harness', zoom: 140 });
+  let displayedState = state.getTabState(map, currentTabId);
+  const activated = [];
+  const synchronizer = state.createActiveTabSynchronizer({
+    getCurrentTabId: () => currentTabId,
+    getActiveTab: async () => activeTab,
+    onActivate: async tab => {
+      activated.push(tab.id);
+      currentTabId = tab.id;
+      displayedState = state.getTabState(map, currentTabId);
+    }
+  });
+
+  assert.equal(await synchronizer.reconcile(), false);
+
+  activeTab = { id: 22, windowId: 7 };
+  assert.equal(await synchronizer.reconcile(), true);
+  assert.deepEqual(activated, [22]);
+  assert.deepEqual(displayedState, {
+    app: 'harness',
+    zoom: 140,
+    harnessSessionId: '',
+    frameUrls: {}
+  });
+
+  assert.equal(await synchronizer.reconcile(), false);
+  assert.deepEqual(activated, [22]);
+});

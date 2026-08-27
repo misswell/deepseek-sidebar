@@ -85,6 +85,8 @@ let tabStateStorageWrite = Promise.resolve();
 let tabLifecycleReady = false;
 let pendingActiveTab = null;
 let tabActivationQueue = Promise.resolve();
+let activeTabSyncTimer = null;
+const ACTIVE_TAB_SYNC_INTERVAL_MS = 500;
 let harnessUrlDiscoveryPromise = null;
 let harnessUrlDiscoveryTarget = '';
 let lastHarnessUrlDiscoveryAt = 0;
@@ -280,6 +282,12 @@ function captureCurrentPanelState() {
   };
 }
 
+function persistCurrentPanelState() {
+  if (currentTabId === null) return;
+  captureCurrentPanelState();
+  persistPanelState(currentTabId);
+}
+
 function restorePanelState(tabId) {
   const state = getPanelState(tabId);
   if (!state) return;
@@ -466,8 +474,7 @@ function activateTab(tabId, windowId) {
     void executeElementPickCancel(pickingTabId);
     if (pickWaitResolver) pickWaitResolver('cancelled');
   }
-  captureCurrentPanelState();
-  if (currentTabId !== null) persistPanelState(currentTabId);
+  persistCurrentPanelState();
   currentTabId = id;
   if (windowId !== undefined) currentWindowId = windowId;
   restorePanelState(id);
@@ -827,7 +834,9 @@ function renderFrameApp(appId, tabId) {
   const group = frameGroupForTab(tabId, false);
   if (!frame || !group) return;
   group.forEach((item, id) => item.classList.toggle('hidden', id !== appId));
-  group.forEach(item => applyZoomToFrame(item, currentZoom));
+  const state = getPanelState(tabId);
+  const zoom = state ? state.zoom : currentZoom;
+  group.forEach(item => applyZoomToFrame(item, zoom));
   if ((loadedAppsForTab(tabId, false) || new Set()).has(appId)) loading.classList.add('hidden');
   else {
     loading.classList.remove('hidden');
@@ -1005,21 +1014,50 @@ function queryTabById(tabId) {
   });
 }
 
-function queryActiveTab() {
+function queryActiveTabWith(query, missingMessage) {
   return new Promise((resolve, reject) => {
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-      const error = chrome.runtime.lastError;
-      if (error) {
-        reject(new Error(error.message));
-        return;
-      }
-      if (!tabs || !tabs[0] || typeof tabs[0].id !== 'number') {
-        reject(new Error('未找到当前标签页'));
-        return;
-      }
-      resolve(tabs[0]);
-    });
+    try {
+      chrome.tabs.query(query, (tabs) => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+        if (!tabs || !tabs[0] || typeof tabs[0].id !== 'number') {
+          reject(new Error(missingMessage));
+          return;
+        }
+        resolve(tabs[0]);
+      });
+    } catch (error) {
+      reject(error);
+    }
   });
+}
+
+function queryActiveTab() {
+  return queryActiveTabWith(
+    { active: true, lastFocusedWindow: true },
+    '未找到当前标签页'
+  );
+}
+
+function queryPanelActiveTab() {
+  const query = currentWindowId !== null
+    ? { active: true, windowId: currentWindowId }
+    : { active: true, lastFocusedWindow: true };
+  return queryActiveTabWith(query, '未找到当前窗口的活动标签页');
+}
+
+const activeTabSynchronizer = DeepSeekSidebarTabState.createActiveTabSynchronizer({
+  getCurrentTabId: () => currentTabId,
+  getActiveTab: queryPanelActiveTab,
+  onActivate: tab => scheduleTabActivation(tab.id, tab.windowId)
+});
+
+function reconcileActiveTab() {
+  if (!tabLifecycleReady) return Promise.resolve(false);
+  return activeTabSynchronizer.reconcile().catch(() => false);
 }
 
 function hasHostPermissionFor(url) {
@@ -1546,6 +1584,10 @@ document.addEventListener('keydown', (e) => {
   else if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); applyZoom(currentZoom - ZOOM_STEP); }
 });
 
+window.addEventListener('pagehide', () => {
+  persistCurrentPanelState();
+});
+
 setTimeout(() => loading.classList.add('hidden'), 8000);
 
 // Restore saved state (last, in case storage API fails)
@@ -1577,5 +1619,10 @@ setTimeout(() => loading.classList.add('hidden'), 8000);
     await scheduleTabActivation(pending.tabId, pending.windowId);
   } else if (initialTab && Number.isSafeInteger(initialTab.id)) {
     await scheduleTabActivation(initialTab.id, initialTab.windowId);
+  }
+  if (activeTabSyncTimer === null) {
+    activeTabSyncTimer = setInterval(() => {
+      void reconcileActiveTab();
+    }, ACTIVE_TAB_SYNC_INTERVAL_MS);
   }
 })();
