@@ -190,9 +190,10 @@ if (!shouldRun) {
     const panelBTarget = await waitForSidePanelTarget(cdp, extensionId);
     const panelB = await attachToChromeTarget(cdp, panelBTarget.targetId);
     await waitForPanelToTrackActiveTab(panelB);
-    await waitForPanelState(panelB, 'harness', 100);
+    // A newly created tab should inherit the last sidebar zoom preference.
+    await waitForPanelState(panelB, 'harness', 80);
     await clickPanel(panelB, '.app-btn[data-app="qianwen"]');
-    await clickPanel(panelB, '#zoom-in', 4);
+    await clickPanel(panelB, '#zoom-in', 6);
     await waitForPanelState(panelB, 'qianwen', 140);
 
     await launcher.bringToFront();
@@ -203,7 +204,7 @@ if (!shouldRun) {
     await waitForStoredState(panelB, 'Tab B', 'qianwen', 140);
 
     assert.equal(await panelB.evaluate(() => document.querySelector('#zoom-label')?.textContent), '140%');
-    process.stdout.write('PASS: per-tab app and zoom survived active-tab switching\n');
+    process.stdout.write('PASS: new tabs inherited zoom and existing tab app/zoom state survived switching\n');
   } finally {
     await context.close();
   }

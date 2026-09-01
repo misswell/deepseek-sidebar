@@ -48,6 +48,7 @@ const APPS = Object.fromEntries(APP_META.map(app => [
 ]));
 
 let currentZoom = 100;
+let defaultZoom = 100;
 let currentApp = null;
 let currentTabId = null;
 let currentWindowId = null;
@@ -118,7 +119,10 @@ function getPanelState(tabId) {
   const id = numericTabId(tabId);
   if (id === null) return null;
   if (!tabPanelStates.has(id)) {
-    tabPanelStates.set(id, createPanelState(id, DeepSeekSidebarTabState.getTabState(persistedTabStates, id)));
+    const storedState = DeepSeekSidebarTabState.getTabState(persistedTabStates, id);
+    const state = createPanelState(id, storedState);
+    if (!storedState) state.zoom = defaultZoom;
+    tabPanelStates.set(id, state);
   }
   const state = tabPanelStates.get(id);
   if (!APPS[state.app]) state.app = DeepSeekSidebarTabState.DEFAULT_APP;
@@ -187,6 +191,15 @@ function persistPanelState(tabId) {
   queueTabStateStorageWrite(id);
 }
 
+function persistZoomPreference(zoom) {
+  defaultZoom = DeepSeekSidebarTabState.normalizeZoom(zoom);
+  try {
+    chrome.storage.local.set({ [ZOOM_KEY]: defaultZoom }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (error) {}
+}
+
 function readLocalStorage(keys) {
   return new Promise(resolve => {
     try {
@@ -235,6 +248,9 @@ function readOpenTabIds() {
 
 async function loadPanelStateStore(initialTabId) {
   const result = await readLocalStorage(null);
+  const storedZoom = Number(result[ZOOM_KEY]);
+  const hasGlobalZoomPreference = Number.isFinite(storedZoom);
+  defaultZoom = DeepSeekSidebarTabState.normalizeZoom(result[ZOOM_KEY]);
   persistedTabStates = DeepSeekSidebarTabState.normalizeMap(result[TAB_STATE_KEY]);
   Object.entries(result).forEach(([key, value]) => {
     const tabId = DeepSeekSidebarContext.tabIdFromStateStorageKey(key);
@@ -254,6 +270,14 @@ async function loadPanelStateStore(initialTabId) {
   }
   const initialId = numericTabId(initialTabId);
   const initialKey = initialId === null ? null : String(initialId);
+  if (!hasGlobalZoomPreference) {
+    const states = Object.values(persistedTabStates);
+    const fallbackState = (initialKey !== null && persistedTabStates[initialKey]) || states[states.length - 1];
+    if (fallbackState) {
+      defaultZoom = DeepSeekSidebarTabState.normalizeZoom(fallbackState.zoom);
+      persistZoomPreference(defaultZoom);
+    }
+  }
   const hasLegacyState = result[APP_KEY] || result[ZOOM_KEY] || result[HARNESS_SESSION_KEY];
   if (initialKey !== null && !persistedTabStates[initialKey] && hasLegacyState) {
     persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, initialId, {
@@ -907,6 +931,7 @@ function switchApp(appId) {
 
 function applyZoom(zoom) {
   currentZoom = DeepSeekSidebarTabState.normalizeZoom(zoom);
+  persistZoomPreference(currentZoom);
   const state = getPanelState(currentTabId);
   if (state) {
     state.zoom = currentZoom;
