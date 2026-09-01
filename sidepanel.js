@@ -50,6 +50,7 @@ const APPS = Object.fromEntries(APP_META.map(app => [
 let currentZoom = 100;
 let defaultZoom = 100;
 let currentApp = null;
+let defaultApp = DeepSeekSidebarTabState.DEFAULT_APP;
 let currentTabId = null;
 let currentWindowId = null;
 let panelBoundTabId = null;
@@ -121,7 +122,10 @@ function getPanelState(tabId) {
   if (!tabPanelStates.has(id)) {
     const storedState = DeepSeekSidebarTabState.getTabState(persistedTabStates, id);
     const state = createPanelState(id, storedState);
-    if (!storedState) state.zoom = defaultZoom;
+    if (!storedState) {
+      state.app = defaultApp;
+      state.zoom = defaultZoom;
+    }
     tabPanelStates.set(id, state);
   }
   const state = tabPanelStates.get(id);
@@ -200,6 +204,16 @@ function persistZoomPreference(zoom) {
   } catch (error) {}
 }
 
+function persistAppPreference(appId) {
+  if (!APPS[appId]) return;
+  defaultApp = appId;
+  try {
+    chrome.storage.local.set({ [APP_KEY]: defaultApp }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (error) {}
+}
+
 function readLocalStorage(keys) {
   return new Promise(resolve => {
     try {
@@ -250,6 +264,8 @@ async function loadPanelStateStore(initialTabId) {
   const result = await readLocalStorage(null);
   const storedZoom = Number(result[ZOOM_KEY]);
   const hasGlobalZoomPreference = Number.isFinite(storedZoom);
+  const hasGlobalAppPreference = typeof result[APP_KEY] === 'string' && Boolean(APPS[result[APP_KEY]]);
+  defaultApp = hasGlobalAppPreference ? result[APP_KEY] : DeepSeekSidebarTabState.DEFAULT_APP;
   defaultZoom = DeepSeekSidebarTabState.normalizeZoom(result[ZOOM_KEY]);
   persistedTabStates = DeepSeekSidebarTabState.normalizeMap(result[TAB_STATE_KEY]);
   Object.entries(result).forEach(([key, value]) => {
@@ -270,9 +286,13 @@ async function loadPanelStateStore(initialTabId) {
   }
   const initialId = numericTabId(initialTabId);
   const initialKey = initialId === null ? null : String(initialId);
+  const states = Object.values(persistedTabStates);
+  const fallbackState = (initialKey !== null && persistedTabStates[initialKey]) || states[states.length - 1];
+  if (!hasGlobalAppPreference && fallbackState && APPS[fallbackState.app]) {
+    defaultApp = fallbackState.app;
+    persistAppPreference(defaultApp);
+  }
   if (!hasGlobalZoomPreference) {
-    const states = Object.values(persistedTabStates);
-    const fallbackState = (initialKey !== null && persistedTabStates[initialKey]) || states[states.length - 1];
     if (fallbackState) {
       defaultZoom = DeepSeekSidebarTabState.normalizeZoom(fallbackState.zoom);
       persistZoomPreference(defaultZoom);
@@ -919,6 +939,7 @@ function renderCurrentApp() {
 function switchApp(appId) {
   const app = APPS[appId];
   if (!app) return;
+  persistAppPreference(appId);
   captureCurrentPanelState();
   currentApp = appId;
   const state = getPanelState(currentTabId);

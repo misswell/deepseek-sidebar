@@ -424,6 +424,8 @@ test('routes the side panel state by browser tab like the Codex side panel', () 
   assert.match(sidepanel, /DeepSeekSidebarContext\.stateStorageKey/);
   assert.match(sidepanel, /defaultZoom/);
   assert.match(sidepanel, /persistZoomPreference/);
+  assert.match(sidepanel, /defaultApp/);
+  assert.match(sidepanel, /persistAppPreference/);
 });
 
 test('opens the real local Harness conversation page and restores its route per tab', () => {

@@ -190,8 +190,8 @@ if (!shouldRun) {
     const panelBTarget = await waitForSidePanelTarget(cdp, extensionId);
     const panelB = await attachToChromeTarget(cdp, panelBTarget.targetId);
     await waitForPanelToTrackActiveTab(panelB);
-    // A newly created tab should inherit the last sidebar zoom preference.
-    await waitForPanelState(panelB, 'harness', 80);
+    // A newly created tab should inherit the last sidebar app and zoom preference.
+    await waitForPanelState(panelB, 'chatgpt', 80);
     await clickPanel(panelB, '.app-btn[data-app="qianwen"]');
     await clickPanel(panelB, '#zoom-in', 6);
     await waitForPanelState(panelB, 'qianwen', 140);
