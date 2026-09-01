@@ -557,8 +557,110 @@
     });
   }
 
+  function nativeComposerScore(element) {
+    const rect = element.getBoundingClientRect();
+    const label = cleanNativeText([
+      element.id,
+      element.getAttribute('placeholder'),
+      element.getAttribute('aria-label'),
+      element.getAttribute('data-testid')
+    ].filter(Boolean).join(' ')).toLowerCase();
+    let score = Math.min(40, Math.max(0, rect.bottom / Math.max(1, window.innerHeight)) * 40);
+    if (element.id === 'prompt-textarea') score += 120;
+    if (element instanceof HTMLTextAreaElement) score += 45;
+    if (element instanceof HTMLElement && element.isContentEditable) score += 35;
+    if (/prompt|message|提问|输入|发送消息|ask/.test(label)) score += 55;
+    if (/search|搜索/.test(label)) score -= 80;
+    return score + Math.min(20, rect.width / 30);
+  }
+
+  function nativeFindComposer() {
+    const selectors = [
+      '#prompt-textarea',
+      'textarea',
+      '[contenteditable="true"][role="textbox"]',
+      '[contenteditable="true"]',
+      '[contenteditable=""]',
+      '[role="textbox"]'
+    ];
+    const seen = new Set();
+    const candidates = [];
+    selectors.forEach(selector => {
+      document.querySelectorAll(selector).forEach(element => {
+        if (seen.has(element) || !isVisible(element)) return;
+        seen.add(element);
+        if (element.getAttribute('readonly') !== null || element.getAttribute('aria-disabled') === 'true' ||
+            element.disabled === true) return;
+        candidates.push(element);
+      });
+    });
+    candidates.sort((a, b) => nativeComposerScore(b) - nativeComposerScore(a));
+    return candidates[0] || null;
+  }
+
+  function nativeFindSendButton(composer) {
+    const selectors = [
+      'button[data-testid*="send" i]',
+      'button[aria-label*="send" i]',
+      'button[aria-label*="发送"]',
+      'button[title*="send" i]',
+      'button[title*="发送"]',
+      'button[type="submit"]'
+    ];
+    const roots = [];
+    if (composer && composer.closest('form')) roots.push(composer.closest('form'));
+    if (composer && composer.parentElement) roots.push(composer.parentElement);
+    roots.push(document);
+    for (const root of roots) {
+      for (const selector of selectors) {
+        const button = Array.from(root.querySelectorAll(selector)).find(item =>
+          isVisible(item) && !item.disabled && item.getAttribute('aria-disabled') !== 'true');
+        if (button) return button;
+      }
+    }
+    return null;
+  }
+
+  async function nativePrompt(text) {
+    const composer = nativeFindComposer();
+    if (!composer) throw new NativeActionError('composer-not-found', '没有找到可输入的 AI 对话框，请先登录并等待页面加载完成');
+    composer.focus();
+    if (composer instanceof HTMLInputElement || composer instanceof HTMLTextAreaElement) {
+      nativeSetValue(composer, text);
+    } else if (composer instanceof HTMLElement && (composer.isContentEditable || composer.getAttribute('role') === 'textbox')) {
+      composer.textContent = text;
+      composer.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        composed: true,
+        inputType: 'insertText',
+        data: text
+      }));
+    } else {
+      throw new NativeActionError('composer-not-found', '找到的 AI 对话框不可编辑');
+    }
+    await nativeWaitForSettled(80, 40, 400);
+    const sendButton = nativeFindSendButton(composer);
+    if (sendButton) {
+      sendButton.click();
+    } else if (composer.form && typeof composer.form.requestSubmit === 'function') {
+      composer.form.requestSubmit();
+    } else {
+      const options = { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true, composed: true };
+      composer.dispatchEvent(new KeyboardEvent('keydown', options));
+      composer.dispatchEvent(new KeyboardEvent('keypress', options));
+      composer.dispatchEvent(new KeyboardEvent('keyup', options));
+    }
+    await nativeWaitForSettled(100, 80, 600);
+    return { text: 'Prompt submitted.', submitted: true };
+  }
+
   async function nativeRunAction(action, args, budget) {
     const name = String(action || '');
+    if (name === 'browser_prompt') {
+      const text = typeof (args && args.text) === 'string' ? args.text.trim() : '';
+      if (!text) throw new NativeActionError('bad-args', '提问内容不能为空');
+      return await nativePrompt(text);
+    }
     if (name === 'browser_snapshot') {
       const view = nativeSnapshot(args || {}, budget || {});
       return { text: nativeRenderSnapshot(view, args && args.delta === true, view.budgetChars) };

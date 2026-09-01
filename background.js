@@ -2,13 +2,15 @@ importScripts(
   'harness-protocol.js',
   'harness-discovery.js',
   'harness-bridge-client.js',
-  'sidepanel-context.js'
+  'sidepanel-context.js',
+  'app-catalog.js'
 );
 
 const PAGE_BRIDGE_FILE = 'page-bridge.js';
 const HARNESS_HOST_BRIDGE_FILE = 'harness-host-bridge.js';
 const HARNESS_BRIDGE_SOURCE = 'deepseek-sidebar-harness-bridge';
 const PANEL_CONTEXT_SOURCE = 'deepseek-sidebar-panel-context';
+const MULTI_AI_SOURCE = 'deepseek-sidebar-multi-ai';
 const HARNESS_URL_KEY = 'deepseek-sidebar-harness-url';
 const HARNESS_TOKEN_KEY = 'deepseek-sidebar-harness-token';
 const harnessHostTabPromises = new Map();
@@ -405,6 +407,29 @@ function listTabFrames(tabId, tabUrl) {
       resolve(fallback);
     }
   });
+}
+
+async function findMultiAiFrame(tabId, appId) {
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    const frames = await listTabFrames(tabId, '');
+    const frame = frames.find(item => item.frameId !== 0 &&
+      DeepSeekSidebarApps.matchesFrame(appId, item.url));
+    if (frame) return frame;
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  return null;
+}
+
+async function promptMultiAiFrame(tabId, appId, prompt) {
+  const app = DeepSeekSidebarApps.byId(appId);
+  if (!app || !app.multi) throw new Error('不支持的 AI：' + appId);
+  const frame = await findMultiAiFrame(tabId, appId);
+  if (!frame) throw new Error(app.name + ' 页面尚未加载完成');
+  await sendNativePageAction(tabId, frame.frameId, {
+    name: 'browser_prompt',
+    args: { text: prompt }
+  }, null, undefined, frame.documentId);
+  return { appId, ok: true };
 }
 
 function frameOrigin(frame) {
@@ -942,6 +967,25 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.source === MULTI_AI_SOURCE) {
+    const tabId = sender && sender.tab && sender.tab.id;
+    const prompt = typeof message.prompt === 'string' ? message.prompt.trim() : '';
+    const appIds = Array.from(new Set(Array.isArray(message.appIds) ? message.appIds : []))
+      .filter(id => DeepSeekSidebarApps.byId(id)?.multi);
+    if (!Number.isSafeInteger(tabId) || !prompt || appIds.length === 0) {
+      sendResponse({ ok: false, error: '请选择 AI 并输入问题' });
+      return false;
+    }
+    Promise.all(appIds.map(async appId => {
+      try {
+        await promptMultiAiFrame(tabId, appId, prompt);
+        return { appId, ok: true };
+      } catch (error) {
+        return { appId, ok: false, error: error && error.message ? error.message : String(error) };
+      }
+    })).then(results => sendResponse({ ok: true, value: { results } }));
+    return true;
+  }
   if (message && message.source === PANEL_CONTEXT_SOURCE) {
     resolveSidePanelContext(sender)
       .then(value => sendResponse({ ok: true, value }))

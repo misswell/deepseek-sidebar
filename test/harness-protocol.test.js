@@ -359,8 +359,11 @@ test('loads a page bridge instead of input-filling content scripts', () => {
   assert.equal(fs.existsSync(path.join(ROOT_DIR, 'harness-embedded-bridge.js')), false);
 
   const pageBridge = fs.readFileSync(path.join(ROOT_DIR, 'page-bridge.js'), 'utf8');
+  const background = fs.readFileSync(path.join(ROOT_DIR, 'background.js'), 'utf8');
   assert.match(pageBridge, /__deepseekSidebarPageBridgeInstalled\) return/);
   assert.match(pageBridge, /requestSubmit\(\)/);
+  assert.match(pageBridge, /browser_prompt/);
+  assert.match(background, /promptMultiAiFrame/);
   assert.doesNotMatch(pageBridge, /form\.dispatchEvent\(new Event\(['"]submit['"]\)/);
 
   const routeBridge = fs.readFileSync(path.join(ROOT_DIR, 'frame-route-bridge.js'), 'utf8');
@@ -381,6 +384,16 @@ test('uses the real local Harness page while keeping browser tools outside the i
   assert.doesNotMatch(sidepanel, /harness-client\.js/);
   assert.doesNotMatch(sidepanelScript, /buildBrowserTaskPrompt/);
   assert.doesNotMatch(sidepanelScript, /DeepSeekHarnessClient/);
+});
+
+test('exposes a full-page multi AI comparison workspace', () => {
+  const html = fs.readFileSync(path.join(ROOT_DIR, 'multi-ai.html'), 'utf8');
+  const script = fs.readFileSync(path.join(ROOT_DIR, 'multi-ai.js'), 'utf8');
+  assert.match(html, /id="app-choices"/);
+  assert.match(html, /id="results"/);
+  assert.match(script, /deepseek-sidebar-multi-ai/);
+  assert.match(script, /Promise|sendRuntimeMessage/);
+  assert.match(fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8'), /multi-ai-btn/);
 });
 
 test('routes the side panel state by browser tab like the Codex side panel', () => {

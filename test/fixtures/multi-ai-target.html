@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Fake AI</title></head>
+<body>
+  <main>
+    <form id="composer">
+      <textarea aria-label="输入问题" placeholder="输入问题"></textarea>
+      <button type="submit" aria-label="发送">发送</button>
+    </form>
+    <output id="answer"></output>
+  </main>
+  <script>
+    document.getElementById('composer').addEventListener('submit', event => {
+      event.preventDefault();
+      document.getElementById('answer').textContent = event.currentTarget.querySelector('textarea').value;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>多 AI 对比 · DeepSeek Sidebar</title>
+  <link rel="stylesheet" href="multi-ai.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div>
+        <h1>多 AI 对比</h1>
+        <p>一次提问，并排查看原站回答</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="selection-count" class="selection-count"></span>
+      <button id="reload-all" class="quiet-button" type="button">全部刷新</button>
+      <button id="fullscreen" class="quiet-button" type="button">进入全屏</button>
+    </div>
+  </header>
+
+  <section class="control-deck" aria-label="多 AI 提问控制台">
+    <div class="choice-row">
+      <span class="choice-label">发送到</span>
+      <div id="app-choices" class="app-choices"></div>
+    </div>
+    <div class="prompt-track">
+      <textarea id="prompt" rows="1" placeholder="输入同一个问题，按 Ctrl/⌘ + Enter 同时发送…" maxlength="12000"></textarea>
+      <button id="send" class="send-button" type="button">
+        <span>同时提问</span>
+        <kbd>⌘↵</kbd>
+      </button>
+    </div>
+    <div class="dispatch-line" aria-hidden="true"><span></span></div>
+    <p id="global-status" class="global-status" role="status" aria-live="polite">选择至少两个 AI 开始对比</p>
+  </section>
+
+  <main id="results" class="results" aria-label="AI 回答结果"></main>
+
+  <template id="panel-template">
+    <section class="ai-panel">
+      <header class="panel-header">
+        <div class="panel-identity">
+          <span class="brand-line"></span>
+          <img class="panel-icon" alt="">
+          <strong class="panel-name"></strong>
+        </div>
+        <div class="panel-actions">
+          <span class="panel-status"><i></i><span>正在加载</span></span>
+          <button class="panel-open" type="button" title="在新标签打开原站">↗</button>
+          <button class="panel-reload" type="button" title="刷新此 AI">↻</button>
+        </div>
+      </header>
+      <div class="panel-body">
+        <iframe class="ai-frame" allow="clipboard-read; clipboard-write; autoplay; accelerometer; gyroscope; magnetometer"></iframe>
+      </div>
+    </section>
+  </template>
+
+  <script src="app-catalog.js"></script>
+  <script src="multi-ai.js"></script>
+</body>
+</html>

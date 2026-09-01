@@ -3,6 +3,7 @@ const loading = document.getElementById('loading');
 const zoomIn = document.getElementById('zoom-in');
 const zoomOut = document.getElementById('zoom-out');
 const reloadBtn = document.getElementById('refresh');
+const multiAiBtn = document.getElementById('multi-ai-btn');
 const zoomLabel = document.getElementById('zoom-label');
 const pickElementBtn = document.getElementById('pick-element');
 const pageReader = document.getElementById('page-reader');
@@ -40,28 +41,11 @@ const IFRAME_ALLOW = [
   'magnetometer'
 ].join('; ');
 
-const APPS = {
-  harness: { harness: true },
-  deepseek: { url: 'https://chat.deepseek.com/' },
-  zhipu: { url: 'https://chat.z.ai/' },
-  qianwen: { url: 'https://www.qianwen.com/' },
-  kimi: { url: 'https://www.kimi.com/' },
-  chatgpt: { url: 'https://chatgpt.com/' },
-  gemini: { url: 'https://gemini.google.com/app' },
-  youdao: { url: 'https://dict.youdao.com/m/' }
-};
-
-// App metadata for dynamic button rendering — order matters
-const APP_META = [
-  { id: 'harness', name: 'DeepSeek Harness', icon: 'icons/icon-deep.png' },
-  { id: 'deepseek', name: 'DeepSeek', icon: 'icons/deepseek.png' },
-  { id: 'zhipu', name: '智谱', icon: 'icons/zhipu.svg' },
-  { id: 'qianwen', name: '千问', icon: 'icons/qianwen.png' },
-  { id: 'kimi', name: 'Kimi', icon: 'icons/kimi.svg' },
-  { id: 'chatgpt', name: 'ChatGPT', icon: 'icons/chatgpt.png' },
-  { id: 'gemini', name: 'Gemini', icon: 'icons/gemini.png' },
-  { id: 'youdao', name: '有道词典', icon: 'icons/youdao.svg' }
-];
+const APP_META = DeepSeekSidebarApps.apps;
+const APPS = Object.fromEntries(APP_META.map(app => [
+  app.id,
+  app.harness ? { harness: true } : { url: app.url }
+]));
 
 let currentZoom = 100;
 let currentApp = null;
@@ -1604,6 +1588,19 @@ configBtn.addEventListener('click', () => {
   } else {
     window.open(chrome.runtime.getURL('config.html'));
   }
+});
+multiAiBtn.addEventListener('click', () => {
+  const url = chrome.runtime.getURL('multi-ai.html');
+  chrome.tabs.query({ url }, tabs => {
+    void chrome.runtime.lastError;
+    const existing = tabs && tabs[0];
+    if (existing && Number.isSafeInteger(existing.id)) {
+      chrome.tabs.update(existing.id, { active: true });
+      if (Number.isSafeInteger(existing.windowId)) chrome.windows.update(existing.windowId, { focused: true });
+      return;
+    }
+    chrome.tabs.create({ url });
+  });
 });
 reloadBtn.addEventListener('click', () => {
   if (currentApp === 'harness') {

@@ -1,14 +1,8 @@
 // All available apps — must match APP_META in sidepanel.js
-const APPS = [
-  { id: 'harness', name: 'DeepSeek Harness', url: '本地 / 局域网服务', icon: 'icons/icon-deep.png' },
-  { id: 'deepseek', name: 'DeepSeek', url: 'https://chat.deepseek.com/', icon: 'icons/deepseek.png' },
-  { id: 'zhipu', name: '智谱', url: 'https://chat.z.ai/', icon: 'icons/zhipu.svg' },
-  { id: 'qianwen', name: '千问', url: 'https://www.qianwen.com/', icon: 'icons/qianwen.png' },
-  { id: 'kimi', name: 'Kimi', url: 'https://www.kimi.com/', icon: 'icons/kimi.svg' },
-  { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/', icon: 'icons/chatgpt.png' },
-  { id: 'gemini', name: 'Gemini', url: 'https://gemini.google.com/app', icon: 'icons/gemini.png' },
-  { id: 'youdao', name: '有道词典', url: 'https://dict.youdao.com/m/', icon: 'icons/youdao.svg' }
-];
+const APPS = DeepSeekSidebarApps.apps.map(app => ({
+  ...app,
+  url: app.url || app.displayUrl
+}));
 const DEFAULT_ORDER = APPS.map(a => a.id);
 
 const VISIBILITY_KEY = 'deepseek-sidebar-visibility';
