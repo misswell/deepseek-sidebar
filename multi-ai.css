@@ -76,6 +76,11 @@ body {
 }
 .quiet-button { height: 32px; padding: 0 11px; color: #cbd2df; font-size: 12px; }
 .quiet-button:hover, .panel-open:hover, .panel-reload:hover { background: var(--panel-raised); border-color: #46516a; }
+.zoom-controls { display: flex; align-items: center; gap: 2px; height: 32px; border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
+.zoom-button { width: 26px; height: 26px; padding: 0; border: 0; }
+.zoom-label { min-width: 42px; height: 26px; padding: 0 4px; border: 0; border-radius: 4px; background: transparent; color: #cbd2df; cursor: pointer; font: 11px/1 SFMono-Regular, Menlo, monospace; }
+.zoom-label:hover { background: var(--panel-raised); }
+.zoom-button:disabled { cursor: not-allowed; opacity: 0.4; }
 
 .control-deck {
   position: relative;
@@ -104,7 +109,7 @@ body {
 }
 .app-choice img { width: 17px; height: 17px; border-radius: 4px; object-fit: contain; }
 .app-choice[aria-pressed="true"] { color: var(--ink); border-color: var(--app-color); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-color) 40%, transparent); }
-.app-choice:focus-visible, .quiet-button:focus-visible, .send-button:focus-visible,
+.app-choice:focus-visible, .quiet-button:focus-visible, .zoom-label:focus-visible, .send-button:focus-visible,
 .panel-open:focus-visible, .panel-reload:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--signal);
   outline-offset: 2px;
@@ -193,8 +198,8 @@ body.dispatching .dispatch-line span { opacity: 1; animation: dispatch 1s ease-i
 .ai-panel[data-state="error"] .panel-status i { background: var(--danger); }
 @keyframes blink { to { opacity: 0.25; } }
 .panel-open, .panel-reload { width: 26px; height: 25px; padding: 0; color: #aab3c4; }
-.panel-body { min-height: 0; background: #fff; }
-.ai-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.panel-body { min-height: 0; overflow: hidden; background: #fff; }
+.ai-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; transform-origin: top left; }
 
 .empty-results { margin: auto; color: var(--muted); font-size: 13px; }
 

@@ -38,8 +38,33 @@ if (!shouldRun) {
     assert.equal(await page.locator('.ai-panel').count(), 3);
     assert.equal(await page.locator('.app-choice[aria-pressed="true"]').count(), 3);
 
+    await page.locator('#zoom-out').click();
+    await page.locator('#zoom-out').click();
+    await page.waitForFunction(() => document.querySelector('#zoom-label')?.textContent === '80%');
+    assert.deepEqual(await page.locator('.ai-frame').first().evaluate(frame => ({
+      transform: frame.style.transform,
+      width: frame.style.width,
+      height: frame.style.height
+    })), {
+      transform: 'scale(0.8)',
+      width: '125%',
+      height: '125%'
+    });
+    await page.waitForFunction(() => new Promise(resolve => {
+      chrome.storage.local.get('deepseek-sidebar-multi-zoom', values =>
+        resolve(values['deepseek-sidebar-multi-zoom'] === 80));
+    }));
+
+    await page.reload();
+    await page.waitForSelector('.ai-panel');
+    await page.waitForFunction(() => document.querySelector('#zoom-label')?.textContent === '80%');
+    assert.deepEqual(await page.locator('.ai-frame').evaluateAll(frames =>
+      frames.map(frame => frame.style.transform)), ['scale(0.8)', 'scale(0.8)', 'scale(0.8)']);
+
     await page.locator('.app-choice[data-app="gemini"]').click();
     assert.equal(await page.locator('.ai-panel').count(), 4);
+    assert.deepEqual(await page.locator('.ai-frame').evaluateAll(frames =>
+      frames.map(frame => frame.style.transform)), ['scale(0.8)', 'scale(0.8)', 'scale(0.8)', 'scale(0.8)']);
     await page.locator('.app-choice[data-app="gemini"]').click();
     assert.equal(await page.locator('.ai-panel').count(), 3);
 

@@ -389,10 +389,18 @@ test('uses the real local Harness page while keeping browser tools outside the i
 test('exposes a full-page multi AI comparison workspace', () => {
   const html = fs.readFileSync(path.join(ROOT_DIR, 'multi-ai.html'), 'utf8');
   const script = fs.readFileSync(path.join(ROOT_DIR, 'multi-ai.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(ROOT_DIR, 'multi-ai.css'), 'utf8');
   assert.match(html, /id="app-choices"/);
   assert.match(html, /id="results"/);
+  assert.match(html, /id="zoom-out"/);
+  assert.match(html, /id="zoom-label"/);
+  assert.match(html, /id="zoom-in"/);
+  assert.match(html, /tab-state\.js/);
   assert.match(script, /deepseek-sidebar-multi-ai/);
+  assert.match(script, /deepseek-sidebar-multi-zoom/);
+  assert.match(script, /applyZoomToFrame/);
   assert.match(script, /Promise|sendRuntimeMessage/);
+  assert.match(styles, /\.panel-body[^}]*overflow:\s*hidden/);
   assert.match(fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8'), /multi-ai-btn/);
 });
 

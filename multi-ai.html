@@ -17,6 +17,11 @@
     </div>
     <div class="top-actions">
       <span id="selection-count" class="selection-count"></span>
+      <div class="zoom-controls" aria-label="多 AI 页面缩放">
+        <button id="zoom-out" class="quiet-button zoom-button" type="button" title="缩小 (Ctrl/Cmd + -)">−</button>
+        <button id="zoom-label" class="zoom-label" type="button" title="双击恢复 100%">100%</button>
+        <button id="zoom-in" class="quiet-button zoom-button" type="button" title="放大 (Ctrl/Cmd + +)">+</button>
+      </div>
       <button id="reload-all" class="quiet-button" type="button">全部刷新</button>
       <button id="fullscreen" class="quiet-button" type="button">进入全屏</button>
     </div>
@@ -61,6 +66,7 @@
   </template>
 
   <script src="app-catalog.js"></script>
+  <script src="tab-state.js"></script>
   <script src="multi-ai.js"></script>
 </body>
 </html>

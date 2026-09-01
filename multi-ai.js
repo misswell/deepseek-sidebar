@@ -1,8 +1,10 @@
 const MULTI_AI_SOURCE = 'deepseek-sidebar-multi-ai';
 const MULTI_SELECTION_KEY = 'deepseek-sidebar-multi-apps';
+const MULTI_ZOOM_KEY = 'deepseek-sidebar-multi-zoom';
 const VISIBILITY_KEY = 'deepseek-sidebar-visibility';
 const ORDER_KEY = 'deepseek-sidebar-order';
 const DEFAULT_APPS = ['deepseek', 'qianwen', 'chatgpt'];
+const ZOOM_STEP = 10;
 
 const appChoices = document.getElementById('app-choices');
 const results = document.getElementById('results');
@@ -10,6 +12,9 @@ const promptInput = document.getElementById('prompt');
 const sendButton = document.getElementById('send');
 const globalStatus = document.getElementById('global-status');
 const selectionCount = document.getElementById('selection-count');
+const zoomInButton = document.getElementById('zoom-in');
+const zoomOutButton = document.getElementById('zoom-out');
+const zoomLabel = document.getElementById('zoom-label');
 const reloadAllButton = document.getElementById('reload-all');
 const fullscreenButton = document.getElementById('fullscreen');
 const panelTemplate = document.getElementById('panel-template');
@@ -17,6 +22,7 @@ const panelTemplate = document.getElementById('panel-template');
 let availableApps = [];
 let selected = new Set();
 let sending = false;
+let currentZoom = DeepSeekSidebarTabState.DEFAULT_ZOOM;
 const panels = new Map();
 
 function setGlobalStatus(message, error) {
@@ -34,6 +40,32 @@ function setPanelStatus(appId, state, message) {
 
 function persistSelection() {
   chrome.storage.local.set({ [MULTI_SELECTION_KEY]: Array.from(selected) });
+}
+
+function persistZoom() {
+  chrome.storage.local.set({ [MULTI_ZOOM_KEY]: currentZoom });
+}
+
+function applyZoomToFrame(frame, zoom) {
+  const normalizedZoom = DeepSeekSidebarTabState.normalizeZoom(zoom);
+  const scale = normalizedZoom / 100;
+  frame.style.transformOrigin = 'top left';
+  frame.style.transform = `scale(${scale})`;
+  frame.style.width = `${100 / scale}%`;
+  frame.style.height = `${100 / scale}%`;
+}
+
+function updateZoomControls() {
+  zoomLabel.textContent = `${currentZoom}%`;
+  zoomOutButton.disabled = currentZoom <= DeepSeekSidebarTabState.MIN_ZOOM;
+  zoomInButton.disabled = currentZoom >= DeepSeekSidebarTabState.MAX_ZOOM;
+}
+
+function applyZoom(zoom) {
+  currentZoom = DeepSeekSidebarTabState.normalizeZoom(zoom);
+  panels.forEach(panel => applyZoomToFrame(panel.frame, currentZoom));
+  updateZoomControls();
+  persistZoom();
 }
 
 function orderedSelectedApps() {
@@ -68,6 +100,7 @@ function createPanel(app) {
   icon.alt = app.name;
   name.textContent = app.name;
   frame.dataset.app = app.id;
+  applyZoomToFrame(frame, currentZoom);
   frame.addEventListener('load', () => setPanelStatus(app.id, 'ready', '可以提问'));
   root.querySelector('.panel-reload').addEventListener('click', () => {
     setPanelStatus(app.id, 'loading', '正在刷新');
@@ -182,7 +215,9 @@ function resizePrompt() {
 }
 
 function loadState() {
-  chrome.storage.local.get([MULTI_SELECTION_KEY, VISIBILITY_KEY, ORDER_KEY], values => {
+  chrome.storage.local.get([MULTI_SELECTION_KEY, MULTI_ZOOM_KEY, VISIBILITY_KEY, ORDER_KEY], values => {
+    currentZoom = DeepSeekSidebarTabState.normalizeZoom(values[MULTI_ZOOM_KEY]);
+    updateZoomControls();
     const visibility = values[VISIBILITY_KEY] || {};
     const order = Array.isArray(values[ORDER_KEY]) ? values[ORDER_KEY] : DeepSeekSidebarApps.apps.map(app => app.id);
     availableApps = order
@@ -198,6 +233,9 @@ function loadState() {
 }
 
 sendButton.addEventListener('click', dispatchPrompt);
+zoomInButton.addEventListener('click', () => applyZoom(currentZoom + ZOOM_STEP));
+zoomOutButton.addEventListener('click', () => applyZoom(currentZoom - ZOOM_STEP));
+zoomLabel.addEventListener('dblclick', () => applyZoom(DeepSeekSidebarTabState.DEFAULT_ZOOM));
 promptInput.addEventListener('input', resizePrompt);
 promptInput.addEventListener('keydown', event => {
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -222,5 +260,19 @@ fullscreenButton.addEventListener('click', async () => {
 document.addEventListener('fullscreenchange', () => {
   fullscreenButton.textContent = document.fullscreenElement ? '退出全屏' : '进入全屏';
 });
+document.addEventListener('keydown', event => {
+  if (!event.ctrlKey && !event.metaKey) return;
+  if (event.key === '=' || event.key === '+') {
+    event.preventDefault();
+    applyZoom(currentZoom + ZOOM_STEP);
+  } else if (event.key === '-' || event.key === '_') {
+    event.preventDefault();
+    applyZoom(currentZoom - ZOOM_STEP);
+  } else if (event.key === '0') {
+    event.preventDefault();
+    applyZoom(DeepSeekSidebarTabState.DEFAULT_ZOOM);
+  }
+});
 
+updateZoomControls();
 loadState();
