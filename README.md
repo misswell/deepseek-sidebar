@@ -25,6 +25,13 @@
 - **请求头修改** — 自动移除 X-Frame-Options / Content-Security-Policy 响应头，使 AI 站点可在侧边栏 iframe 中加载
 - **简洁工具栏** — 深色主题，不干扰对话体验
 
+## 1.9.12
+
+- 改为与 Codex 扩展一致的 `sidePanel.setOptions({ tabId }) + sidePanel.open({ tabId })` 标签级侧栏配置
+- 每个 Chrome 侧栏文档通过 `SIDE_PANEL` 运行上下文绑定自己的 tab，隐藏侧栏不会再跟随其他标签并覆盖状态
+- 缩放比例、选中 AI 和会话路由改为每个标签独立存储，避免快速切换标签时异步写入互相覆盖
+- 增加真实 Chromium 侧栏回归，验证 `80% + ChatGPT` 与 `140% + 千问` 来回切换仍各自恢复
+
 ## 1.9.11
 
 - 修复侧栏保持打开时切换或新建标签页后，选中的 AI 图标和缩放比例没有可靠恢复的问题

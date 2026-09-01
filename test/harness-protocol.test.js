@@ -392,12 +392,15 @@ test('routes the side panel state by browser tab like the Codex side panel', () 
   assert.match(sidepanel, /chrome\.tabs\.onReplaced/);
   assert.match(sidepanel, /frameGroupForTab/);
   assert.match(fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8'), /tab-state\.js/);
-  assert.match(background, /chrome\.sidePanel\.open\(target\)/);
-  assert.match(background, /\{ windowId: tab\.windowId \}/);
+  assert.match(background, /chrome\.sidePanel\.setOptions\(/);
+  assert.match(background, /chrome\.sidePanel\.open\(\{ tabId/);
+  assert.match(background, /DeepSeekSidebarContext\.panelOptionsForTab/);
+  assert.match(background, /contextTypes: \['SIDE_PANEL'\]/);
+  assert.match(sidepanel, /panelBoundTabId/);
   assert.match(background, /harness-discovery\.js/);
   assert.match(sidepanel, /resolveConfiguredHarnessUrl/);
   assert.match(sidepanel, /createActiveTabSynchronizer/);
-  assert.match(sidepanel, /ACTIVE_TAB_SYNC_INTERVAL_MS/);
+  assert.match(sidepanel, /DeepSeekSidebarContext\.stateStorageKey/);
 });
 
 test('opens the real local Harness conversation page and restores its route per tab', () => {

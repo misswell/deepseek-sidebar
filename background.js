@@ -1,8 +1,14 @@
-importScripts('harness-protocol.js', 'harness-discovery.js', 'harness-bridge-client.js');
+importScripts(
+  'harness-protocol.js',
+  'harness-discovery.js',
+  'harness-bridge-client.js',
+  'sidepanel-context.js'
+);
 
 const PAGE_BRIDGE_FILE = 'page-bridge.js';
 const HARNESS_HOST_BRIDGE_FILE = 'harness-host-bridge.js';
 const HARNESS_BRIDGE_SOURCE = 'deepseek-sidebar-harness-bridge';
+const PANEL_CONTEXT_SOURCE = 'deepseek-sidebar-panel-context';
 const HARNESS_URL_KEY = 'deepseek-sidebar-harness-url';
 const HARNESS_TOKEN_KEY = 'deepseek-sidebar-harness-token';
 const harnessHostTabPromises = new Map();
@@ -38,16 +44,49 @@ function broadcastHarnessBridgeStatus() {
   } catch (error) {}
 }
 
+function configureTabSidePanel(tabId) {
+  const id = Number(tabId);
+  if (!Number.isSafeInteger(id) || id < 0) return Promise.resolve();
+  return Promise.resolve(chrome.sidePanel.setOptions(
+    DeepSeekSidebarContext.panelOptionsForTab(id)
+  )).catch(() => {});
+}
+
+function configureWindowSidePanels(windowId) {
+  return new Promise(resolve => {
+    const query = Number.isSafeInteger(windowId) ? { windowId } : {};
+    chrome.tabs.query(query, tabs => {
+      void chrome.runtime.lastError;
+      Promise.all((tabs || []).map(tab => configureTabSidePanel(tab && tab.id))).then(resolve);
+    });
+  });
+}
+
 chrome.action.onClicked.addListener((tab) => {
-  if (tab && typeof tab.id === 'number') {
-    const target = typeof tab.windowId === 'number'
-      ? { windowId: tab.windowId }
-      : { tabId: tab.id };
-    try {
-      Promise.resolve(chrome.sidePanel.open(target)).catch(() => {});
-    } catch (error) {}
-  }
+  if (!tab || typeof tab.id !== 'number') return;
+  const configured = configureTabSidePanel(tab.id);
+  void configureWindowSidePanels(tab.windowId);
+  try {
+    const opened = chrome.sidePanel.open({ tabId: tab.id });
+    Promise.all([configured, opened]).catch(() => {});
+  } catch (error) {}
 });
+
+chrome.tabs.onCreated.addListener(tab => {
+  if (tab && typeof tab.id === 'number') void configureTabSidePanel(tab.id);
+});
+
+chrome.tabs.onReplaced.addListener(addedTabId => {
+  void configureTabSidePanel(addedTabId);
+});
+
+void configureWindowSidePanels();
+
+async function resolveSidePanelContext(sender) {
+  if (!chrome.runtime.getContexts || !sender || !sender.documentId) return null;
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ['SIDE_PANEL'] });
+  return DeepSeekSidebarContext.contextForDocument(contexts, sender.documentId);
+}
 
 function sendPageCommand(tabId, message, sendResponse) {
   chrome.scripting.executeScript(
@@ -903,6 +942,12 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.source === PANEL_CONTEXT_SOURCE) {
+    resolveSidePanelContext(sender)
+      .then(value => sendResponse({ ok: true, value }))
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message && message.source === HARNESS_BRIDGE_SOURCE) {
     return handleHarnessBridgeCommand(message, sendResponse);
   }

@@ -23,8 +23,9 @@ const HARNESS_TOKEN_KEY = 'deepseek-sidebar-harness-token';
 const HARNESS_SESSION_KEY = 'deepseek-sidebar-harness-session';
 const TAB_STATE_KEY = 'deepseek-sidebar-tab-states';
 const TAB_STATE_VERSION_KEY = 'deepseek-sidebar-tab-state-version';
-const TAB_STATE_VERSION = 2;
+const TAB_STATE_VERSION = 3;
 const HARNESS_BRIDGE_SOURCE = 'deepseek-sidebar-harness-bridge';
+const PANEL_CONTEXT_SOURCE = 'deepseek-sidebar-panel-context';
 const FRAME_ROUTE_SOURCE = 'deepseek-sidebar-frame-route';
 const FRAME_ROUTE_INIT_SOURCE = 'deepseek-sidebar-frame-route-init';
 const ZOOM_STEP = 10;
@@ -66,6 +67,7 @@ let currentZoom = 100;
 let currentApp = null;
 let currentTabId = null;
 let currentWindowId = null;
+let panelBoundTabId = null;
 let currentPageText = '';
 let currentHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
 let configuredHarnessUrl = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
@@ -154,13 +156,17 @@ function ensureVisibleApp(tabId) {
   return state;
 }
 
-function queueTabStateStorageWrite() {
-  const snapshot = JSON.parse(JSON.stringify(persistedTabStates));
+function queueTabStateStorageWrite(tabId) {
+  const id = numericTabId(tabId);
+  const key = DeepSeekSidebarContext.stateStorageKey(id);
+  const state = DeepSeekSidebarTabState.getTabState(persistedTabStates, id);
+  if (!key || !state) return tabStateStorageWrite;
+  const snapshot = JSON.parse(JSON.stringify(state));
   tabStateStorageWrite = tabStateStorageWrite
     .catch(() => {})
     .then(() => new Promise(resolve => {
       try {
-        chrome.storage.local.set({ [TAB_STATE_KEY]: snapshot }, () => {
+        chrome.storage.local.set({ [key]: snapshot }, () => {
           void chrome.runtime.lastError;
           resolve();
         });
@@ -168,6 +174,20 @@ function queueTabStateStorageWrite() {
         resolve();
       }
     }));
+  return tabStateStorageWrite;
+}
+
+function removeStoredTabState(tabId) {
+  const key = DeepSeekSidebarContext.stateStorageKey(tabId);
+  if (!key) return;
+  try {
+    chrome.storage.local.remove(key, () => { void chrome.runtime.lastError; });
+  } catch (error) {}
+}
+
+function queueAllTabStateStorageWrites() {
+  Object.keys(persistedTabStates).forEach(tabId => queueTabStateStorageWrite(tabId));
+  return tabStateStorageWrite;
 }
 
 function persistPanelState(tabId) {
@@ -180,7 +200,7 @@ function persistPanelState(tabId) {
     harnessSessionId: state.harnessSessionId,
     frameUrls: state.frameUrls
   });
-  queueTabStateStorageWrite();
+  queueTabStateStorageWrite(id);
 }
 
 function readLocalStorage(keys) {
@@ -192,6 +212,24 @@ function readLocalStorage(keys) {
       });
     } catch (error) {
       resolve({});
+    }
+  });
+}
+
+function resolvePanelContext() {
+  return new Promise(resolve => {
+    try {
+      chrome.runtime.sendMessage({ source: PANEL_CONTEXT_SOURCE }, response => {
+        void chrome.runtime.lastError;
+        const value = response && response.ok ? response.value : null;
+        const tabId = numericTabId(value && value.tabId);
+        resolve(tabId === null ? null : {
+          tabId,
+          windowId: Number.isSafeInteger(value.windowId) ? value.windowId : null
+        });
+      });
+    } catch (error) {
+      resolve(null);
     }
   });
 }
@@ -212,14 +250,14 @@ function readOpenTabIds() {
 }
 
 async function loadPanelStateStore(initialTabId) {
-  const result = await readLocalStorage([
-    TAB_STATE_KEY,
-    APP_KEY,
-    ZOOM_KEY,
-    HARNESS_SESSION_KEY,
-    TAB_STATE_VERSION_KEY
-  ]);
+  const result = await readLocalStorage(null);
   persistedTabStates = DeepSeekSidebarTabState.normalizeMap(result[TAB_STATE_KEY]);
+  Object.entries(result).forEach(([key, value]) => {
+    const tabId = DeepSeekSidebarContext.tabIdFromStateStorageKey(key);
+    if (tabId !== null) {
+      persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, tabId, value);
+    }
+  });
   const storedTabStateVersion = Number(result[TAB_STATE_VERSION_KEY]) || 0;
   if (storedTabStateVersion < TAB_STATE_VERSION) {
     Object.entries(persistedTabStates).forEach(([tabId, state]) => {
@@ -242,7 +280,9 @@ async function loadPanelStateStore(initialTabId) {
     });
   }
   if (storedTabStateVersion < TAB_STATE_VERSION) {
-    queueTabStateStorageWrite();
+    queueAllTabStateStorageWrites().then(() => {
+      try { chrome.storage.local.remove(TAB_STATE_KEY); } catch (error) {}
+    });
     try {
       chrome.storage.local.set({ [TAB_STATE_VERSION_KEY]: TAB_STATE_VERSION }, () => {
         void chrome.runtime.lastError;
@@ -251,14 +291,12 @@ async function loadPanelStateStore(initialTabId) {
   }
   const openTabIds = await readOpenTabIds();
   if (openTabIds) {
-    let removedStaleState = false;
     Object.keys(persistedTabStates).forEach(tabId => {
       if (!openTabIds.has(Number(tabId))) {
         persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, tabId);
-        removedStaleState = true;
+        removeStoredTabState(tabId);
       }
     });
-    if (removedStaleState) queueTabStateStorageWrite();
   }
   tabPanelStates.clear();
   Object.entries(persistedTabStates).forEach(([tabId, state]) => {
@@ -347,7 +385,7 @@ function resetAppFrames(appId) {
   Object.keys(persistedTabStates).forEach(tabId => {
     persistedTabStates = DeepSeekSidebarTabState.setFrameUrl(persistedTabStates, tabId, appId, '');
   });
-  queueTabStateStorageWrite();
+  queueAllTabStateStorageWrites();
 }
 
 function setEffectiveHarnessUrl(url, render) {
@@ -493,7 +531,7 @@ function forgetTabState(tabId) {
   tabPanelStates.delete(id);
   persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, id);
   removeTabFrames(id);
-  queueTabStateStorageWrite();
+  removeStoredTabState(id);
 }
 
 function bindTabLifecycleListeners() {
@@ -551,15 +589,14 @@ function bindTabLifecycleListeners() {
     if (oldLoaded && !loadedAppGroups.has(newId)) loadedAppGroups.set(newId, oldLoaded);
     frameGroups.delete(oldId);
     loadedAppGroups.delete(oldId);
-    queueTabStateStorageWrite();
+    queueTabStateStorageWrite(newId);
+    removeStoredTabState(oldId);
     if (wasCurrent) {
       currentTabId = null;
       scheduleTabActivation(newId, currentWindowId);
     }
   });
 }
-
-bindTabLifecycleListeners();
 
 function renderAppButtons() {
   appSwitcher.innerHTML = '';
@@ -632,9 +669,19 @@ function loadAppVisibility() {
 // Listen for visibility/order changes from config page
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  if (changes[TAB_STATE_KEY]) {
-    persistedTabStates = DeepSeekSidebarTabState.normalizeMap(changes[TAB_STATE_KEY].newValue);
-  }
+  Object.entries(changes).forEach(([key, change]) => {
+    const tabId = DeepSeekSidebarContext.tabIdFromStateStorageKey(key);
+    if (tabId === null) return;
+    if (change && change.newValue) {
+      persistedTabStates = DeepSeekSidebarTabState.setTabState(
+        persistedTabStates,
+        tabId,
+        change.newValue
+      );
+    } else {
+      persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, tabId);
+    }
+  });
   if (changes[VISIBILITY_KEY]) {
     appVisibility = changes[VISIBILITY_KEY].newValue || {};
     if (currentApp && appVisibility[currentApp] === false) {
@@ -1043,6 +1090,7 @@ function queryActiveTab() {
 }
 
 function queryPanelActiveTab() {
+  if (panelBoundTabId !== null) return queryTabById(panelBoundTabId);
   const query = currentWindowId !== null
     ? { active: true, windowId: currentWindowId }
     : { active: true, lastFocusedWindow: true };
@@ -1594,9 +1642,18 @@ setTimeout(() => loading.classList.add('hidden'), 8000);
 (async () => {
   await loadAppVisibility();
   renderAppButtons();
+  const panelContext = await resolvePanelContext();
+  if (panelContext) {
+    panelBoundTabId = panelContext.tabId;
+    currentWindowId = panelContext.windowId;
+  } else {
+    bindTabLifecycleListeners();
+  }
   let initialTab = null;
   try {
-    initialTab = await queryActiveTab();
+    initialTab = panelBoundTabId === null
+      ? await queryActiveTab()
+      : await queryTabById(panelBoundTabId);
     currentWindowId = initialTab.windowId;
   } catch (e) {
     initialTab = null;
@@ -1620,7 +1677,7 @@ setTimeout(() => loading.classList.add('hidden'), 8000);
   } else if (initialTab && Number.isSafeInteger(initialTab.id)) {
     await scheduleTabActivation(initialTab.id, initialTab.windowId);
   }
-  if (activeTabSyncTimer === null) {
+  if (panelBoundTabId === null && activeTabSyncTimer === null) {
     activeTabSyncTimer = setInterval(() => {
       void reconcileActiveTab();
     }, ACTIVE_TAB_SYNC_INTERVAL_MS);
