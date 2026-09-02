@@ -11,15 +11,16 @@
     :root {
       --toolbar-height: 30px;
       --toolbar-control-size: 22px;
+      --toolbar-action-size: 20px;
     }
 
     #toolbar {
       display: flex;
       align-items: center;
       justify-content: flex-start;
-      gap: 4px;
+      gap: 3px;
       height: var(--toolbar-height);
-      padding: 0 5px;
+      padding: 0 4px;
       background: #1a1a2e;
       border-bottom: 1px solid #16213e;
       flex-shrink: 0;
@@ -72,18 +73,18 @@
       display: flex;
       align-items: center;
       flex: 0 0 auto;
-      gap: 1px;
+      gap: 0;
     }
 
     .zoom-controls button {
-      flex: 0 0 var(--toolbar-control-size);
-      width: var(--toolbar-control-size);
-      height: var(--toolbar-control-size);
+      flex: 0 0 var(--toolbar-action-size);
+      width: var(--toolbar-action-size);
+      height: var(--toolbar-action-size);
       border: none;
-      border-radius: 5px;
+      border-radius: 4px;
       background: transparent;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 12px;
       line-height: 1;
       color: #aaa;
       display: flex;
@@ -96,11 +97,11 @@
     .zoom-controls button:active { background: #3a3a5a; }
 
     #zoom-label {
-      font-size: 11px;
+      font-size: 10px;
       color: #999;
-      flex: 0 0 32px;
-      min-width: 32px;
-      height: var(--toolbar-control-size);
+      flex: 0 0 28px;
+      min-width: 28px;
+      height: var(--toolbar-action-size);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -306,6 +307,26 @@
     }
 
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    .multi-ai-mark {
+      display: inline-flex;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 2px;
+      width: 13px;
+      height: 13px;
+    }
+
+    .multi-ai-mark > span {
+      display: block;
+      width: 3px;
+      border-radius: 2px;
+      background: currentColor;
+    }
+
+    .multi-ai-mark > span:nth-child(1) { height: 8px; }
+    .multi-ai-mark > span:nth-child(2) { height: 13px; }
+    .multi-ai-mark > span:nth-child(3) { height: 10px; }
   </style>
 </head>
 <body>
@@ -317,7 +338,9 @@
       <button id="zoom-in" title="放大 (Ctrl/Cmd + +)">+</button>
       <button id="pick-element" title="选择页面元素">⌖</button>
       <button id="refresh" title="刷新页面 (F5)">↻</button>
-      <button id="multi-ai-btn" title="全屏多 AI 对比">▦</button>
+      <button id="multi-ai-btn" title="全屏多 AI 对比" aria-label="全屏多 AI 对比">
+        <span class="multi-ai-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+      </button>
       <button id="config-btn" title="设置">⚙</button>
     </div>
   </div>
