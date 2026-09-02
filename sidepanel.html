@@ -9,17 +9,17 @@
     html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; flex-direction: column; }
 
     :root {
-      --toolbar-height: 32px;
-      --toolbar-control-size: 24px;
+      --toolbar-height: 30px;
+      --toolbar-control-size: 22px;
     }
 
     #toolbar {
       display: flex;
       align-items: center;
       justify-content: flex-start;
-      gap: 6px;
+      gap: 4px;
       height: var(--toolbar-height);
-      padding: 0 6px;
+      padding: 0 5px;
       background: #1a1a2e;
       border-bottom: 1px solid #16213e;
       flex-shrink: 0;
@@ -29,7 +29,7 @@
     .app-switcher {
       display: flex;
       align-items: center;
-      flex: 1 1 auto;
+      flex: 1 1 0;
       gap: 1px;
       min-width: 0;
       overflow-x: auto;
@@ -57,16 +57,16 @@
     .app-btn.active { border-color: rgba(255,255,255,0.5); background: #2a2a4a; }
 
     .app-btn img {
-      width: var(--icon-size, 20px);
-      height: var(--icon-size, 20px);
+      width: var(--icon-size, 18px);
+      height: var(--icon-size, 18px);
       border-radius: 3px;
       object-fit: contain;
       display: block;
     }
 
-    .app-btn[data-app="qianwen"] img { --icon-size: 18px; }
-    .app-btn[data-app="gemini"] img { --icon-size: 21px; }
-    .app-btn[data-app="youdao"] img { --icon-size: 20px; }
+    .app-btn[data-app="qianwen"] img { --icon-size: 17px; }
+    .app-btn[data-app="gemini"] img { --icon-size: 19px; }
+    .app-btn[data-app="youdao"] img { --icon-size: 18px; }
 
     .zoom-controls {
       display: flex;
@@ -83,7 +83,7 @@
       border-radius: 5px;
       background: transparent;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 13px;
       line-height: 1;
       color: #aaa;
       display: flex;
