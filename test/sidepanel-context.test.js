@@ -14,8 +14,17 @@ test('creates Codex-style tab-scoped side panel options', () => {
 
 test('uses an independent storage key for every browser tab', () => {
   assert.equal(context.stateStorageKey(42), 'deepseek-sidebar-tab-state:42');
-  assert.equal(context.tabIdFromStateStorageKey('deepseek-sidebar-tab-state:42'), 42);
-  assert.equal(context.tabIdFromStateStorageKey('deepseek-sidebar-tab-states'), null);
+  assert.equal(context.slotFromStateStorageKey('deepseek-sidebar-tab-state:42'), 42);
+  assert.equal(context.slotFromStateStorageKey('deepseek-sidebar-tab-states'), null);
+});
+
+test('stores the unified sidebar state under one shared slot key', () => {
+  assert.equal(context.stateStorageKey(context.SHARED_STATE_SLOT),
+    'deepseek-sidebar-tab-state:shared');
+  assert.equal(context.stateStorageKey('shared'), 'deepseek-sidebar-tab-state:shared');
+  assert.equal(context.slotFromStateStorageKey('deepseek-sidebar-tab-state:shared'), 'shared');
+  // Real tab ids never collide with the shared slot.
+  assert.notEqual(context.slotFromStateStorageKey('deepseek-sidebar-tab-state:shared'), 42);
 });
 
 test('binds each side panel document to its owning Chrome tab', () => {

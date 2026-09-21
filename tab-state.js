@@ -6,8 +6,12 @@
   const MIN_ZOOM = 30;
   const MAX_ZOOM = 200;
   const MAX_FRAME_URL_LENGTH = 4096;
+  // The unified-sidebar mode maps every browser tab onto this single state
+  // slot; it can never collide with a numeric Chrome tab id.
+  const SHARED_SLOT = 'shared';
 
   function tabKey(tabId) {
+    if (tabId === SHARED_SLOT) return SHARED_SLOT;
     if (tabId === null || tabId === undefined ||
         (typeof tabId === 'string' && tabId.trim() === '')) return null;
     const value = typeof tabId === 'number' ? tabId : Number(tabId);
@@ -142,6 +146,7 @@
     DEFAULT_ZOOM,
     MIN_ZOOM,
     MAX_ZOOM,
+    SHARED_SLOT,
     tabKey,
     normalizeZoom,
     normalizeFrameUrl,

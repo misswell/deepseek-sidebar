@@ -348,7 +348,7 @@ test('settings page explains and highlights a missing DSH browser bridge', () =>
   assert.match(config, /HARNESS_INSTALL_COMMAND/);
 });
 
-test('loads a page bridge instead of input-filling content scripts', () => {
+test('loads a page bridge instead of a separate input-filling content script', () => {
   assert.ok(manifest.permissions.includes('debugger'));
   const scripts = manifest.content_scripts.flatMap(item => item.js || []);
   assert.ok(scripts.includes('page-bridge.js'));
@@ -375,6 +375,72 @@ test('loads a page bridge instead of input-filling content scripts', () => {
   assert.equal(routeScript && routeScript.world, 'MAIN');
 });
 
+test('fills the picked page element into the input of the app the sidebar shows', () => {
+  const pageBridge = fs.readFileSync(path.join(ROOT_DIR, 'page-bridge.js'), 'utf8');
+  const sidepanelScript = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.js'), 'utf8');
+
+  // The page bridge answers the sidebar's fill request inside every app frame,
+  // including the real Harness page whose composer is a Lexical contenteditable.
+  assert.match(pageBridge, /SIDEBAR_FILL_REQUEST = 'fill-input'/);
+  assert.match(pageBridge, /SIDEBAR_FILL_RESULT = 'fill-input-result'/);
+  assert.match(pageBridge, /data-composer-input/);
+  assert.match(pageBridge, /nativeFindComposer\(\)/);
+  assert.match(pageBridge, /execCommand\('insertText'/);
+  assert.match(pageBridge, /window\.parent\.postMessage/);
+  assert.match(pageBridge, /window\.removeEventListener\('message', sidebarFillListener\)/);
+
+  // Picking an element writes it into the reader and fills the visible app input.
+  assert.match(sidepanelScript, /showSelectedElement\(value\);\s*\n\s*fillCurrentAppInput\(currentPageText\);/);
+  assert.match(sidepanelScript, /function fillCurrentAppInput\(text\)/);
+  assert.match(sidepanelScript, /type: 'fill-input'/);
+  assert.match(sidepanelScript, /'fill-input-result'/);
+  assert.match(sidepanelScript, /已填充到输入框/);
+});
+
+test('hides Harness and 有道词典 by default in both the sidebar and the settings', () => {
+  const sidepanelScript = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.js'), 'utf8');
+  const configScript = fs.readFileSync(path.join(ROOT_DIR, 'config.js'), 'utf8');
+
+  // One catalog rule decides the default; neither surface may hardcode "visible".
+  assert.match(sidepanelScript, /appVisibility\[app\.id\] = DeepSeekSidebarApps\.visibleByDefault\(app\)/);
+  assert.match(configScript, /currentVisibility\[app\.id\] = DeepSeekSidebarApps\.visibleByDefault\(app\)/);
+  // A hidden app must not become the default app for new tabs either.
+  assert.match(sidepanelScript, /appVisibility\[result\[APP_KEY\]\] !== false/);
+  assert.match(sidepanelScript, /appVisibility\[fallbackState\.app\] === false \? firstVisibleApp\(\)/);
+});
+
+test('parks the frames of a hidden side panel instead of growing one per tab', () => {
+  const sidepanelScript = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.js'), 'utf8');
+
+  // Chrome keeps one side panel document per tab, and a hidden document holds its
+  // iframes (Harness page, AI sites, sockets) alive. Unbounded growth is what gets
+  // a panel renderer killed -- and Chrome removes the side panel when that happens.
+  assert.match(sidepanelScript, /const PANEL_IDLE_PARK_MS = \d+/);
+  assert.match(sidepanelScript, /addEventListener\('visibilitychange'/);
+  assert.match(sidepanelScript, /function parkPanelFrames\(\)/);
+  assert.match(sidepanelScript, /function restoreParkedFrames\(\)/);
+  assert.match(sidepanelScript, /function framesAreParked\(\)/);
+  // Parking must free the iframes, not just hide them.
+  assert.match(sidepanelScript, /group\.forEach\(frame => frame\.remove\(\)\)/);
+  // A hidden, parked document must not rebuild frames when another tab activates.
+  assert.match(sidepanelScript, /if \(framesAreParked\(\)\) return;/);
+});
+
+test('bounds what a picked page element sends into the side panel', () => {
+  const sidepanelScript = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.js'), 'utf8');
+  const picker = sidepanelScript.match(/function pickPageElement\(\)[\s\S]*?\n}\n/)[0];
+
+  // The cap lives inside the injected function: chrome.scripting serializes it,
+  // so a module-level constant would be missing in the page.
+  assert.match(picker, /const MAX_PICKED_TEXT_LENGTH = \d+/);
+  assert.match(picker, /const MAX_PICKED_HTML_PREVIEW_LENGTH = \d+/);
+  assert.match(picker, /text: text\.slice\(0, MAX_PICKED_TEXT_LENGTH\)/);
+  assert.match(picker, /textTruncated: text\.length > MAX_PICKED_TEXT_LENGTH/);
+  // The whole markup must never cross the boundary, only its length.
+  assert.match(picker, /htmlLength: html\.length/);
+  assert.doesNotMatch(picker, /html: element\.outerHTML/);
+});
+
 test('uses the real local Harness page while keeping browser tools outside the input path', () => {
   const sidepanel = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8');
   const sidepanelScript = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.js'), 'utf8');
@@ -384,6 +450,24 @@ test('uses the real local Harness page while keeping browser tools outside the i
   assert.doesNotMatch(sidepanel, /harness-client\.js/);
   assert.doesNotMatch(sidepanelScript, /buildBrowserTaskPrompt/);
   assert.doesNotMatch(sidepanelScript, /DeepSeekHarnessClient/);
+});
+
+test('renders every toolbar action with one shared inline SVG icon set', () => {
+  const sidepanel = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8');
+  const toolbar = sidepanel.match(/<div class="zoom-controls">[\s\S]*?<\/div>/)[0];
+  const buttons = toolbar.match(/<button[\s\S]*?<\/button>/g) || [];
+  assert.equal(buttons.length, 6);
+  for (const button of buttons) {
+    // Same viewBox for all six, so size and optical weight cannot drift.
+    assert.match(button, /<svg viewBox="0 0 24 24" aria-hidden="true">/);
+  }
+  // One rule owns the rendered size, stroke and color of the whole set.
+  assert.match(sidepanel, /--toolbar-icon-size: 10\.5px;/);
+  assert.match(sidepanel, /--toolbar-action-size: 15px;/);
+  assert.match(sidepanel, /\.zoom-controls button > svg \{[\s\S]*?width: var\(--toolbar-icon-size\);[\s\S]*?stroke-width: 2\.7;/);
+  // No platform font glyphs or bespoke bars left in the toolbar.
+  assert.doesNotMatch(toolbar, /⌖|↻|⚙|−|\+<\/button>/);
+  assert.doesNotMatch(sidepanel, /multi-ai-mark/);
 });
 
 test('exposes a full-page multi AI comparison workspace', () => {
@@ -402,6 +486,26 @@ test('exposes a full-page multi AI comparison workspace', () => {
   assert.match(script, /Promise|sendRuntimeMessage/);
   assert.match(styles, /\.panel-body[^}]*overflow:\s*hidden/);
   assert.match(fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8'), /multi-ai-btn/);
+});
+
+test('themes iframe surfaces with the browser color scheme to avoid white flashes', () => {
+  const sidepanel = fs.readFileSync(path.join(ROOT_DIR, 'sidepanel.html'), 'utf8');
+  const multiAi = fs.readFileSync(path.join(ROOT_DIR, 'multi-ai.html'), 'utf8');
+  const styles = fs.readFileSync(path.join(ROOT_DIR, 'multi-ai.css'), 'utf8');
+  assert.match(sidepanel, /name="color-scheme" content="light dark"/);
+  assert.match(sidepanel, /@media \(prefers-color-scheme: dark\)/);
+  assert.match(sidepanel, /--panel-surface:\s*#ffffff/);
+  assert.match(sidepanel, /--panel-surface:\s*#151517/);
+  assert.match(sidepanel, /--loading-surface:\s*#1a1a2e/);
+  assert.match(sidepanel, /\.loading\s*\{[^}]*background:\s*var\(--loading-surface\)/);
+  assert.match(sidepanel, /#webview-container\s*\{[^}]*background:\s*var\(--panel-surface\)/);
+  assert.match(sidepanel, /\.webview-frame\s*\{[^}]*background:\s*var\(--panel-surface\)/);
+  assert.match(sidepanel, /\.harness-page-frame\s*\{[^}]*background:\s*var\(--panel-surface\)/);
+  assert.doesNotMatch(sidepanel, /#webview-container[^}]*background:\s*#fff/i);
+  assert.match(multiAi, /name="color-scheme" content="dark"/);
+  assert.match(styles, /\.panel-body[^}]*background:\s*var\(--canvas\)/);
+  assert.match(styles, /\.ai-frame[^}]*background:\s*var\(--canvas\)/);
+  assert.doesNotMatch(styles, /\.ai-frame[^}]*background:\s*#fff/i);
 });
 
 test('routes the side panel state by browser tab like the Codex side panel', () => {

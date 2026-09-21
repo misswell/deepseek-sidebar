@@ -49,6 +49,51 @@ test('discovers a running DSH instance when default port 3080 is unavailable', a
   assert.ok(calls.includes('http://127.0.0.1:3080/ext/bridge-config'));
 });
 
+test('prefers an embeddable DSH page over an authenticated bridge-only instance', async () => {
+  const fetchImpl = async url => {
+    if (url === 'http://127.0.0.1:3080/ext/bridge-config') {
+      return fakeResponse({
+        ok: true,
+        status: 200,
+        json: async () => ({ wsUrl: 'ws://127.0.0.1:3080/ext/bridge' })
+      });
+    }
+    if (url === 'http://127.0.0.1:3080') {
+      // Auth-protected DSH keeps its bridge config public but 401s the page.
+      return fakeResponse({
+        ok: false,
+        status: 401,
+        text: async () => 'dsh web authentication required; reopen the URL printed by dsh web.'
+      });
+    }
+    if (url === 'http://127.0.0.1:3081/ext/bridge-config') {
+      return fakeResponse({
+        ok: true,
+        status: 200,
+        json: async () => ({ wsUrl: 'ws://127.0.0.1:3080/ext/bridge' })
+      });
+    }
+    if (url === 'http://127.0.0.1:3081') {
+      return fakeResponse({
+        ok: true,
+        status: 200,
+        text: async () => '<title>DeepSeek Harness</title><div id="root"></div>'
+      });
+    }
+    return fakeResponse();
+  };
+
+  const result = await discovery.discover(protocol.DEFAULT_HARNESS_URL, {
+    fetchImpl,
+    timeoutMs: 50
+  });
+
+  assert.equal(result.baseUrl, 'http://127.0.0.1:3081');
+  assert.equal(result.bridgeUrl, 'ws://127.0.0.1:3080/ext/bridge');
+  assert.equal(result.pageDetected, true);
+  assert.equal(result.detected, true);
+});
+
 test('falls back to a DSH page when its browser bridge is not installed', async () => {
   const fetchImpl = async url => {
     if (url === 'http://127.0.0.1:3082') {

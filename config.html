@@ -333,11 +333,67 @@
     }
 
     .harness-status.error { color: #fda4af; }
+
+    .behavior-settings {
+      margin: 0 0 22px;
+      border: 1px solid #333366;
+      border-radius: 12px;
+      padding: 16px;
+      background: #22224a;
+    }
+
+    .behavior-settings h2 {
+      color: #fff;
+      font-size: 15px;
+      letter-spacing: -0.02em;
+    }
+
+    .behavior-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-top: 12px;
+      cursor: pointer;
+    }
+
+    .behavior-option input {
+      width: 16px;
+      height: 16px;
+      margin: 2px 0 0;
+      flex-shrink: 0;
+      accent-color: #4a6cf7;
+      cursor: pointer;
+    }
+
+    .behavior-text strong {
+      display: block;
+      color: #e0e0e0;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .behavior-text small {
+      display: block;
+      margin-top: 4px;
+      color: #888;
+      font-size: 11px;
+      line-height: 1.5;
+    }
   </style>
 </head>
 <body>
   <h1>顶部栏显示设置</h1>
-  <p class="subtitle">勾选要在侧边栏顶部显示的网站</p>
+  <p class="subtitle">勾选要在侧边栏顶部显示的网站（DeepSeek Harness 与有道词典默认不显示）</p>
+  <section class="behavior-settings">
+    <h2>侧边栏行为</h2>
+    <label class="behavior-option">
+      <input type="checkbox" id="perTabSidebar">
+      <span class="behavior-text">
+        <strong>每个标签页使用独立侧边栏</strong>
+        <small>开启：新标签页会获得自己的侧边栏，切换标签页时侧边栏跟随各自的状态。关闭：所有标签页共享同一个侧边栏，新标签页延续当前内容，切换标签页时侧边栏保持不变。修改立即生效并自动保存。</small>
+      </span>
+    </label>
+  </section>
   <section class="harness-settings">
     <div class="harness-heading">
       <span class="harness-signal"></span>

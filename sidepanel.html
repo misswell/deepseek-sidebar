@@ -3,15 +3,38 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
   <title>DeepSeek Sidebar</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; flex-direction: column; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      display: flex;
+      flex-direction: column;
+      background: var(--panel-surface);
+    }
 
     :root {
       --toolbar-height: 30px;
       --toolbar-control-size: 22px;
-      --toolbar-action-size: 20px;
+      --toolbar-action-size: 15px;
+      --toolbar-icon-size: 10.5px;
+      /* Surface behind the AI iframes. It follows the browser/system theme so the
+         blank frame while switching top apps or browser tabs never flashes white. */
+      --panel-surface: #ffffff;
+      --loading-surface: #1a1a2e;
+      color-scheme: light;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --panel-surface: #151517;
+        --loading-surface: #151517;
+        color-scheme: dark;
+      }
     }
 
     #toolbar {
@@ -81,10 +104,9 @@
       width: var(--toolbar-action-size);
       height: var(--toolbar-action-size);
       border: none;
-      border-radius: 4px;
+      border-radius: 3px;
       background: transparent;
       cursor: pointer;
-      font-size: 12px;
       line-height: 1;
       color: #aaa;
       display: flex;
@@ -93,14 +115,28 @@
       transition: background 0.15s, color 0.15s;
     }
 
+    /* Every toolbar action shares one icon grid: same --toolbar-icon-size box,
+       same 24-unit geometry, same stroke, so no glyph falls back to a font. */
+    .zoom-controls button > svg {
+      width: var(--toolbar-icon-size);
+      height: var(--toolbar-icon-size);
+      display: block;
+      fill: none;
+      stroke: currentColor;
+      /* 2.2 at 13px; same optical weight at 10.5px (2.2 * 13 / 10.5). */
+      stroke-width: 2.7;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
     .zoom-controls button:hover { background: #2a2a4a; color: #fff; }
     .zoom-controls button:active { background: #3a3a5a; }
 
     #zoom-label {
-      font-size: 10px;
-      color: #999;
-      flex: 0 0 28px;
-      min-width: 28px;
+      font-size: 12px;
+      color: #aaa;
+      flex: 0 0 30px;
+      min-width: 30px;
       height: var(--toolbar-action-size);
       display: flex;
       align-items: center;
@@ -113,7 +149,7 @@
       min-height: 0;
       overflow: hidden;
       position: relative;
-      background: #fff;
+      background: var(--panel-surface);
     }
 
     .webview-frame {
@@ -123,12 +159,14 @@
       transform-origin: 0 0;
       width: 100%;
       height: 100%;
+      background: var(--panel-surface);
+      color-scheme: inherit;
       /* visibility handled by JS */
     }
 
     .webview-frame.hidden { display: none; }
 
-    .harness-page-frame { background: #fff; }
+    .harness-page-frame { background: var(--panel-surface); }
 
     .loading {
       position: absolute;
@@ -136,7 +174,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #1a1a2e;
+      background: var(--loading-surface);
       z-index: 10;
       transition: opacity 0.3s;
     }
@@ -307,41 +345,31 @@
     }
 
     @keyframes spin { to { transform: rotate(360deg); } }
-
-    .multi-ai-mark {
-      display: inline-flex;
-      align-items: flex-end;
-      justify-content: center;
-      gap: 2px;
-      width: 13px;
-      height: 13px;
-    }
-
-    .multi-ai-mark > span {
-      display: block;
-      width: 3px;
-      border-radius: 2px;
-      background: currentColor;
-    }
-
-    .multi-ai-mark > span:nth-child(1) { height: 8px; }
-    .multi-ai-mark > span:nth-child(2) { height: 13px; }
-    .multi-ai-mark > span:nth-child(3) { height: 10px; }
   </style>
 </head>
 <body>
   <div id="toolbar">
     <div class="app-switcher" id="appSwitcher"></div>
     <div class="zoom-controls">
-      <button id="zoom-out" title="缩小 (Ctrl/Cmd + -)">−</button>
-      <span id="zoom-label">100%</span>
-      <button id="zoom-in" title="放大 (Ctrl/Cmd + +)">+</button>
-      <button id="pick-element" title="选择页面元素">⌖</button>
-      <button id="refresh" title="刷新页面 (F5)">↻</button>
-      <button id="multi-ai-btn" title="全屏多 AI 对比" aria-label="全屏多 AI 对比">
-        <span class="multi-ai-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+      <button id="zoom-out" title="缩小 (Ctrl/Cmd + -)" aria-label="缩小">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
       </button>
-      <button id="config-btn" title="设置">⚙</button>
+      <span id="zoom-label">100%</span>
+      <button id="zoom-in" title="放大 (Ctrl/Cmd + +)" aria-label="放大">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+      </button>
+      <button id="pick-element" title="选择页面元素" aria-label="选择页面元素">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><path d="M12 2v3.5"/><path d="M12 18.5V22"/><path d="M2 12h3.5"/><path d="M18.5 12H22"/></svg>
+      </button>
+      <button id="refresh" title="刷新页面 (F5)" aria-label="刷新页面">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+      </button>
+      <button id="multi-ai-btn" title="全屏多 AI 对比" aria-label="全屏多 AI 对比">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20v-6"/><path d="M12 20V4"/><path d="M18 20v-9"/></svg>
+      </button>
+      <button id="config-btn" title="设置" aria-label="设置">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
     </div>
   </div>
   <div id="webview-container">

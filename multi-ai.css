@@ -261,7 +261,7 @@ body.dispatching .dispatch-line span { opacity: 1; animation: dispatch 1s ease-i
   min-width: 0;
   display: grid;
   grid-template-rows: 38px minmax(0, 1fr);
-  background: #fff;
+  background: var(--canvas);
 }
 .panel-header {
   display: flex;
@@ -286,8 +286,8 @@ body.dispatching .dispatch-line span { opacity: 1; animation: dispatch 1s ease-i
 .ai-panel[data-state="error"] .panel-status i { background: var(--danger); }
 @keyframes blink { to { opacity: 0.25; } }
 .panel-open, .panel-reload { width: 28px; height: 26px; padding: 0; color: #aab3c4; }
-.panel-body { min-height: 0; overflow: hidden; background: #fff; }
-.ai-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; transform-origin: top left; }
+.panel-body { min-height: 0; overflow: hidden; background: var(--canvas); }
+.ai-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--canvas); color-scheme: inherit; transform-origin: top left; }
 
 .empty-results { margin: auto; color: var(--muted); font-size: 13px; }
 

@@ -25,6 +25,11 @@ const HARNESS_SESSION_KEY = 'deepseek-sidebar-harness-session';
 const TAB_STATE_KEY = 'deepseek-sidebar-tab-states';
 const TAB_STATE_VERSION_KEY = 'deepseek-sidebar-tab-state-version';
 const TAB_STATE_VERSION = 3;
+// true = every browser tab keeps its own sidebar state (default); false = all
+// tabs share one sidebar, so new tabs continue the current conversation and
+// switching tabs never swaps the sidebar content.
+const PER_TAB_SIDEBAR_KEY = 'deepseek-sidebar-per-tab-sidebar';
+const SHARED_SLOT = DeepSeekSidebarTabState.SHARED_SLOT;
 const HARNESS_BRIDGE_SOURCE = 'deepseek-sidebar-harness-bridge';
 const PANEL_CONTEXT_SOURCE = 'deepseek-sidebar-panel-context';
 const FRAME_ROUTE_SOURCE = 'deepseek-sidebar-frame-route';
@@ -32,6 +37,13 @@ const FRAME_ROUTE_INIT_SOURCE = 'deepseek-sidebar-frame-route-init';
 const ZOOM_STEP = 10;
 const ZOOM_MIN = 30;
 const ZOOM_MAX = 200;
+// Chrome hands every tab its own side panel document, and a hidden document keeps
+// its iframes -- the whole Harness page, every AI site, and their sockets -- alive.
+// Visiting tabs therefore grows the browser without bound; once memory pressure
+// kills a panel renderer, Chrome removes the side panel outright (no error page),
+// which is exactly "the sidebar closed by itself". Park the heavy frames of a
+// document that stays hidden for a while, and rebuild them on the next visit.
+const PANEL_IDLE_PARK_MS = 30000;
 const IFRAME_ALLOW = [
   'clipboard-read',
   'clipboard-write',
@@ -67,13 +79,19 @@ let pickingTabId = null;
 let pickCancelled = false;
 let pickWaitResolver = null;
 let pickPendingNavigation = false;
+let fillRequestSequence = 0;
+let pendingFillRequestId = 0;
+let pendingFillTimer = null;
 let tabPanelStates = new Map();
 let persistedTabStates = {};
+let perTabSidebarMode = true;
 let tabStateStorageWrite = Promise.resolve();
 let tabLifecycleReady = false;
 let pendingActiveTab = null;
 let tabActivationQueue = Promise.resolve();
 let activeTabSyncTimer = null;
+let panelIdleParkTimer = null;
+let parkedFrameTabId = null;
 const ACTIVE_TAB_SYNC_INTERVAL_MS = 500;
 let harnessUrlDiscoveryPromise = null;
 let harnessUrlDiscoveryTarget = '';
@@ -89,7 +107,17 @@ const loadedAppGroups = new Map();
 
 function numericTabId(tabId) {
   const key = DeepSeekSidebarTabState.tabKey(tabId);
-  return key === null ? null : Number(key);
+  if (key === null || key === SHARED_SLOT) return null;
+  const value = Number(key);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+// The state slot a browser tab's panel state lives in: the tab id itself in
+// per-tab mode, or one fixed slot that every tab shares in unified mode.
+// Control-plane ids (harness binding, page commands) always stay real tab ids.
+function stateSlotForTab(tabId) {
+  if (!perTabSidebarMode) return SHARED_SLOT;
+  return numericTabId(tabId);
 }
 
 function isCurrentPanelTab(tabId) {
@@ -117,18 +145,18 @@ function createPanelState(tabId, stableState) {
 }
 
 function getPanelState(tabId) {
-  const id = numericTabId(tabId);
-  if (id === null) return null;
-  if (!tabPanelStates.has(id)) {
-    const storedState = DeepSeekSidebarTabState.getTabState(persistedTabStates, id);
-    const state = createPanelState(id, storedState);
+  const slot = stateSlotForTab(tabId);
+  if (slot === null) return null;
+  if (!tabPanelStates.has(slot)) {
+    const storedState = DeepSeekSidebarTabState.getTabState(persistedTabStates, slot);
+    const state = createPanelState(slot, storedState);
     if (!storedState) {
       state.app = defaultApp;
       state.zoom = defaultZoom;
     }
-    tabPanelStates.set(id, state);
+    tabPanelStates.set(slot, state);
   }
-  const state = tabPanelStates.get(id);
+  const state = tabPanelStates.get(slot);
   if (!APPS[state.app]) state.app = DeepSeekSidebarTabState.DEFAULT_APP;
   return state;
 }
@@ -148,10 +176,9 @@ function ensureVisibleApp(tabId) {
   return state;
 }
 
-function queueTabStateStorageWrite(tabId) {
-  const id = numericTabId(tabId);
-  const key = DeepSeekSidebarContext.stateStorageKey(id);
-  const state = DeepSeekSidebarTabState.getTabState(persistedTabStates, id);
+function queueTabStateStorageWrite(slot) {
+  const key = DeepSeekSidebarContext.stateStorageKey(slot);
+  const state = DeepSeekSidebarTabState.getTabState(persistedTabStates, slot);
   if (!key || !state) return tabStateStorageWrite;
   const snapshot = JSON.parse(JSON.stringify(state));
   tabStateStorageWrite = tabStateStorageWrite
@@ -184,15 +211,15 @@ function queueAllTabStateStorageWrites() {
 
 function persistPanelState(tabId) {
   const state = getPanelState(tabId);
-  const id = numericTabId(tabId);
-  if (!state || id === null) return;
-  persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, id, {
+  const slot = stateSlotForTab(tabId);
+  if (!state || slot === null) return;
+  persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, slot, {
     app: state.app,
     zoom: state.zoom,
     harnessSessionId: state.harnessSessionId,
     frameUrls: state.frameUrls
   });
-  queueTabStateStorageWrite(id);
+  queueTabStateStorageWrite(slot);
 }
 
 function persistZoomPreference(zoom) {
@@ -262,16 +289,21 @@ function readOpenTabIds() {
 
 async function loadPanelStateStore(initialTabId) {
   const result = await readLocalStorage(null);
+  perTabSidebarMode = result[PER_TAB_SIDEBAR_KEY] !== false;
   const storedZoom = Number(result[ZOOM_KEY]);
   const hasGlobalZoomPreference = Number.isFinite(storedZoom);
   const hasGlobalAppPreference = typeof result[APP_KEY] === 'string' && Boolean(APPS[result[APP_KEY]]);
-  defaultApp = hasGlobalAppPreference ? result[APP_KEY] : DeepSeekSidebarTabState.DEFAULT_APP;
+  // A hidden app (Harness and 有道词典 ship hidden) must not be the default for a
+  // new tab either, so fall back to the first app the user can actually see.
+  defaultApp = hasGlobalAppPreference && appVisibility[result[APP_KEY]] !== false
+    ? result[APP_KEY]
+    : firstVisibleApp();
   defaultZoom = DeepSeekSidebarTabState.normalizeZoom(result[ZOOM_KEY]);
   persistedTabStates = DeepSeekSidebarTabState.normalizeMap(result[TAB_STATE_KEY]);
   Object.entries(result).forEach(([key, value]) => {
-    const tabId = DeepSeekSidebarContext.tabIdFromStateStorageKey(key);
-    if (tabId !== null) {
-      persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, tabId, value);
+    const slot = DeepSeekSidebarContext.slotFromStateStorageKey(key);
+    if (slot !== null) {
+      persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, slot, value);
     }
   });
   const storedTabStateVersion = Number(result[TAB_STATE_VERSION_KEY]) || 0;
@@ -286,10 +318,11 @@ async function loadPanelStateStore(initialTabId) {
   }
   const initialId = numericTabId(initialTabId);
   const initialKey = initialId === null ? null : String(initialId);
+  const initialSlot = perTabSidebarMode ? initialKey : SHARED_SLOT;
   const states = Object.values(persistedTabStates);
-  const fallbackState = (initialKey !== null && persistedTabStates[initialKey]) || states[states.length - 1];
+  const fallbackState = (initialSlot !== null && persistedTabStates[initialSlot]) || states[states.length - 1];
   if (!hasGlobalAppPreference && fallbackState && APPS[fallbackState.app]) {
-    defaultApp = fallbackState.app;
+    defaultApp = appVisibility[fallbackState.app] === false ? firstVisibleApp() : fallbackState.app;
     persistAppPreference(defaultApp);
   }
   if (!hasGlobalZoomPreference) {
@@ -299,8 +332,8 @@ async function loadPanelStateStore(initialTabId) {
     }
   }
   const hasLegacyState = result[APP_KEY] || result[ZOOM_KEY] || result[HARNESS_SESSION_KEY];
-  if (initialKey !== null && !persistedTabStates[initialKey] && hasLegacyState) {
-    persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, initialId, {
+  if (initialSlot !== null && !persistedTabStates[initialSlot] && hasLegacyState) {
+    persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, initialSlot, {
       app: storedTabStateVersion < TAB_STATE_VERSION && result[APP_KEY] === 'deepseek'
         ? DeepSeekSidebarTabState.DEFAULT_APP : result[APP_KEY],
       zoom: result[ZOOM_KEY],
@@ -319,17 +352,21 @@ async function loadPanelStateStore(initialTabId) {
   }
   const openTabIds = await readOpenTabIds();
   if (openTabIds) {
-    Object.keys(persistedTabStates).forEach(tabId => {
-      if (!openTabIds.has(Number(tabId))) {
-        persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, tabId);
-        removeStoredTabState(tabId);
+    Object.keys(persistedTabStates).forEach(slot => {
+      // The shared slot is not owned by any tab, so closing tabs never prunes it.
+      if (slot === SHARED_SLOT) return;
+      if (!openTabIds.has(Number(slot))) {
+        persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, slot);
+        removeStoredTabState(slot);
       }
     });
   }
   tabPanelStates.clear();
-  Object.entries(persistedTabStates).forEach(([tabId, state]) => {
-    const id = numericTabId(tabId);
-    if (id !== null) tabPanelStates.set(id, createPanelState(id, state));
+  Object.entries(persistedTabStates).forEach(([key, state]) => {
+    // Match the key type getPanelState caches under: numbers for tabs, the
+    // shared slot string for unified mode.
+    const slot = key === SHARED_SLOT ? SHARED_SLOT : numericTabId(key);
+    if (slot !== null) tabPanelStates.set(slot, createPanelState(slot, state));
   });
 }
 
@@ -370,34 +407,86 @@ function restorePanelState(tabId) {
 }
 
 function frameGroupForTab(tabId, create) {
-  const id = numericTabId(tabId);
-  if (id === null) return null;
-  let group = frameGroups.get(id);
+  const slot = stateSlotForTab(tabId);
+  if (slot === null) return null;
+  let group = frameGroups.get(slot);
   if (!group && create) {
     group = new Map();
-    frameGroups.set(id, group);
+    frameGroups.set(slot, group);
   }
   return group || null;
 }
 
 function loadedAppsForTab(tabId, create) {
-  const id = numericTabId(tabId);
-  if (id === null) return null;
-  let apps = loadedAppGroups.get(id);
+  const slot = stateSlotForTab(tabId);
+  if (slot === null) return null;
+  let apps = loadedAppGroups.get(slot);
   if (!apps && create) {
     apps = new Set();
-    loadedAppGroups.set(id, apps);
+    loadedAppGroups.set(slot, apps);
   }
   return apps || null;
 }
 
 function removeTabFrames(tabId) {
-  const id = numericTabId(tabId);
-  const group = frameGroupForTab(id, false);
+  const slot = stateSlotForTab(tabId);
+  const group = frameGroupForTab(slot, false);
   if (group) group.forEach(frame => frame.remove());
-  frameGroups.delete(id);
-  loadedAppGroups.delete(id);
+  if (slot === null) return;
+  frameGroups.delete(slot);
+  loadedAppGroups.delete(slot);
 }
+
+function framesAreParked() {
+  return parkedFrameTabId !== null && document.visibilityState === 'hidden';
+}
+
+function parkPanelFrames() {
+  panelIdleParkTimer = null;
+  if (document.visibilityState !== 'hidden') return false;
+  if (frameGroups.size === 0) return false;
+  frameGroups.forEach((group, tabId) => {
+    group.forEach(frame => frame.remove());
+    frameGroups.delete(tabId);
+    loadedAppGroups.delete(tabId);
+  });
+  parkedFrameTabId = numericTabId(currentTabId);
+  loading.classList.remove('hidden');
+  return true;
+}
+
+function restoreParkedFrames() {
+  if (parkedFrameTabId === null) return;
+  parkedFrameTabId = null;
+  renderCurrentApp();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    if (panelIdleParkTimer === null && parkedFrameTabId === null) {
+      panelIdleParkTimer = setTimeout(parkPanelFrames, PANEL_IDLE_PARK_MS);
+    }
+    return;
+  }
+  if (panelIdleParkTimer !== null) {
+    clearTimeout(panelIdleParkTimer);
+    panelIdleParkTimer = null;
+  }
+  // Another tab's panel may have moved the shared state while this document
+  // was hidden, so unified mode re-reads it before showing anything.
+  if (!perTabSidebarMode && tabLifecycleReady) {
+    restorePanelState(currentTabId);
+    const state = ensureVisibleApp(currentTabId);
+    if (state) currentApp = state.app;
+    if (parkedFrameTabId !== null) {
+      restoreParkedFrames();
+      return;
+    }
+    renderCurrentApp();
+    return;
+  }
+  restoreParkedFrames();
+});
 
 function resetAppFrames(appId) {
   frameGroups.forEach((group, tabId) => {
@@ -554,8 +643,10 @@ function activateTab(tabId, windowId) {
 function forgetTabState(tabId) {
   const id = numericTabId(tabId);
   if (id === null) return;
-  if (currentTabId === id) captureCurrentPanelState();
   if (harnessTargetBoundTabId === id) unbindHarnessTarget();
+  // In unified mode the shared sidebar outlives any single browser tab.
+  if (!perTabSidebarMode) return;
+  if (currentTabId === id) captureCurrentPanelState();
   tabPanelStates.delete(id);
   persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, id);
   removeTabFrames(id);
@@ -662,19 +753,23 @@ function renderAppButtons() {
   }
 }
 
+function normalizeAppVisibility(saved) {
+  const visibility = Object.assign({}, saved && typeof saved === 'object' ? saved : {});
+  APP_META.forEach(app => {
+    // No stored choice -> the catalog default decides. DeepSeek Harness and
+    // 有道词典 ship hidden; switching them on in 设置 stores an explicit true.
+    if (typeof visibility[app.id] !== 'boolean') {
+      visibility[app.id] = DeepSeekSidebarApps.visibleByDefault(app);
+    }
+  });
+  return visibility;
+}
+
 function loadAppVisibility() {
   return new Promise((resolve) => {
     try {
       chrome.storage.local.get([VISIBILITY_KEY, ORDER_KEY], (result) => {
-        const saved = result[VISIBILITY_KEY];
-        if (saved && typeof saved === 'object') {
-          appVisibility = saved;
-        } else {
-          APP_META.forEach(app => { appVisibility[app.id] = true; });
-        }
-        APP_META.forEach(app => {
-          if (typeof appVisibility[app.id] !== 'boolean') appVisibility[app.id] = true;
-        });
+        appVisibility = normalizeAppVisibility(result[VISIBILITY_KEY]);
         const savedOrder = result[ORDER_KEY];
         if (Array.isArray(savedOrder)) {
           appOrder = savedOrder.filter(id => APP_META.some(a => a.id === id));
@@ -687,31 +782,82 @@ function loadAppVisibility() {
         resolve();
       });
     } catch (e) {
-      APP_META.forEach(app => { appVisibility[app.id] = true; });
+      APP_META.forEach(app => { appVisibility[app.id] = DeepSeekSidebarApps.visibleByDefault(app); });
       appOrder = APP_META.map(a => a.id);
       resolve();
     }
   });
 }
 
+// Flip between per-tab and unified sidebars. Only the visible panel document
+// migrates the live state into the slot of the new mode; hidden documents
+// pick the shared slot up from storage events and re-read it on visibility.
+function applySidebarScopeMode(nextMode) {
+  if (nextMode === perTabSidebarMode) return;
+  const previousMode = perTabSidebarMode;
+  const canMigrate = tabLifecycleReady && currentTabId !== null &&
+    document.visibilityState === 'visible';
+  if (canMigrate) {
+    captureCurrentPanelState();
+    const sourceSlot = previousMode ? numericTabId(currentTabId) : SHARED_SLOT;
+    const targetSlot = previousMode ? SHARED_SLOT : numericTabId(currentTabId);
+    const liveState = getPanelState(currentTabId);
+    if (liveState && sourceSlot !== null && targetSlot !== null && sourceSlot !== targetSlot) {
+      persistedTabStates = DeepSeekSidebarTabState.setTabState(persistedTabStates, targetSlot, {
+        app: liveState.app,
+        zoom: liveState.zoom,
+        harnessSessionId: liveState.harnessSessionId,
+        frameUrls: liveState.frameUrls
+      });
+      queueTabStateStorageWrite(targetSlot);
+    }
+    // Drop the frames of the outgoing slot so the re-render below rebuilds
+    // them under the slot of the new mode.
+    removeTabFrames(currentTabId);
+  }
+  perTabSidebarMode = nextMode;
+  if (!canMigrate) return;
+  const nextSlot = stateSlotForTab(currentTabId);
+  if (nextSlot === null) return;
+  tabPanelStates.delete(nextSlot);
+  restorePanelState(currentTabId);
+  const state = ensureVisibleApp(currentTabId);
+  if (state) currentApp = state.app;
+  renderCurrentApp();
+}
+
 // Listen for visibility/order changes from config page
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   Object.entries(changes).forEach(([key, change]) => {
-    const tabId = DeepSeekSidebarContext.tabIdFromStateStorageKey(key);
-    if (tabId === null) return;
+    const slot = DeepSeekSidebarContext.slotFromStateStorageKey(key);
+    if (slot === null) return;
     if (change && change.newValue) {
       persistedTabStates = DeepSeekSidebarTabState.setTabState(
         persistedTabStates,
-        tabId,
+        slot,
         change.newValue
       );
+      // The shared slot is written by whichever panel document is visible;
+      // refresh the cached copy so a hidden document shows the latest state
+      // as soon as it becomes visible again.
+      if (slot === SHARED_SLOT && tabPanelStates.has(SHARED_SLOT)) {
+        const cached = tabPanelStates.get(SHARED_SLOT);
+        const fresh = createPanelState(SHARED_SLOT, change.newValue);
+        fresh.pageText = cached.pageText;
+        fresh.pageReader = cached.pageReader;
+        tabPanelStates.set(SHARED_SLOT, fresh);
+      }
     } else {
-      persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, tabId);
+      persistedTabStates = DeepSeekSidebarTabState.removeTabState(persistedTabStates, slot);
+      if (slot === SHARED_SLOT) tabPanelStates.delete(SHARED_SLOT);
     }
   });
+  if (changes[PER_TAB_SIDEBAR_KEY]) {
+    applySidebarScopeMode(changes[PER_TAB_SIDEBAR_KEY].newValue !== false);
+  }
   if (changes[VISIBILITY_KEY]) {
-    appVisibility = changes[VISIBILITY_KEY].newValue || {};
+    appVisibility = normalizeAppVisibility(changes[VISIBILITY_KEY].newValue);
     if (currentApp && appVisibility[currentApp] === false) {
       const state = getPanelState(currentTabId);
       if (state) {
@@ -926,6 +1072,9 @@ function renderCurrentApp() {
   if (!APPS[currentApp]) return;
   appButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.app === currentApp));
   hideAllFrames();
+  // A parked document stays empty while it is hidden: another tab's activated
+  // panel must not rebuild the iframes this document just released.
+  if (framesAreParked()) return;
   if (currentApp === 'harness') {
     renderFrameApp(currentApp, currentTabId);
     activateHarnessBridge(currentTabId);
@@ -1190,6 +1339,11 @@ function pickPageElement() {
 
   return new Promise((resolve) => {
     const previousCursor = document.documentElement.style.cursor;
+    // This function is serialized into the page by chrome.scripting, so the cap
+    // has to live inside it. Picking <body> must not hand the panel (and the
+    // composer it fills) a multi-megabyte string.
+    const MAX_PICKED_TEXT_LENGTH = 200000;
+    const MAX_PICKED_HTML_PREVIEW_LENGTH = 2000;
     const overlay = document.createElement('div');
     const label = document.createElement('div');
     let currentElement = null;
@@ -1266,13 +1420,20 @@ function pickPageElement() {
     function describeElement(element) {
       const selector = getElementSelector(element);
       const text = (element.innerText || element.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+      const html = element.outerHTML || '';
+      // Only the markup's length is reported: the markup itself is never used and
+      // would be the largest thing crossing the scripting boundary.
       return {
         title: document.title || '未命名页面',
         url: location.href,
         tagName: element.tagName.toLowerCase(),
         selector,
-        text,
-        html: element.outerHTML || ''
+        text: text.slice(0, MAX_PICKED_TEXT_LENGTH),
+        textTruncated: text.length > MAX_PICKED_TEXT_LENGTH,
+        htmlLength: html.length,
+        // A text-less element (an image, a chart) still has to show something,
+        // so keep a small bounded preview instead of the whole markup.
+        htmlPreview: text ? '' : html.slice(0, MAX_PICKED_HTML_PREVIEW_LENGTH)
       };
     }
 
@@ -1442,12 +1603,13 @@ function openPageReader(expanded) {
 }
 
 function showSelectedElement(result) {
-  currentPageText = result.text || result.html || '';
+  currentPageText = result.text || result.htmlPreview || '';
   pageReaderTitle.textContent = result.tagName ? '已选择 <' + result.tagName + '>' : '已选择页面元素';
   pageReaderMeta.textContent = [result.selector, result.url].filter(Boolean).join(' · ');
   pageReaderContent.value = currentPageText;
   pageReaderStatus.textContent = currentPageText
-    ? currentPageText.length + ' 字符 · HTML ' + (result.html ? result.html.length : 0) + ' 字符'
+    ? currentPageText.length + ' 字符' + (result.textTruncated ? '（已截断）' : '') +
+      ' · HTML ' + (result.htmlLength || 0) + ' 字符'
     : '该元素没有可见文本';
   openPageReader(false);
 }
@@ -1590,6 +1752,7 @@ async function pickCurrentPageElement() {
       }
 
       showSelectedElement(value);
+      fillCurrentAppInput(currentPageText);
       break;
     }
   } finally {
@@ -1600,6 +1763,70 @@ async function pickCurrentPageElement() {
     pickWaitResolver = null;
   }
 }
+
+function currentAppFrame() {
+  const group = frameGroupForTab(currentTabId, false);
+  if (!group) return null;
+  return group.get(currentApp) || null;
+}
+
+function appendPageReaderStatus(suffix) {
+  const current = pageReaderStatus.textContent || '';
+  pageReaderStatus.textContent = current ? current + ' · ' + suffix : suffix;
+}
+
+function fillCurrentAppInput(text) {
+  if (!text) return;
+  const frame = currentAppFrame();
+  if (!frame || !frame.contentWindow) {
+    appendPageReaderStatus('当前页面尚未加载，无法填充输入框');
+    return;
+  }
+
+  fillRequestSequence += 1;
+  const requestId = fillRequestSequence;
+  pendingFillRequestId = requestId;
+  if (pendingFillTimer !== null) {
+    clearTimeout(pendingFillTimer);
+    pendingFillTimer = null;
+  }
+
+  try {
+    frame.contentWindow.postMessage({
+      source: 'deepseek-sidebar',
+      type: 'fill-input',
+      requestId,
+      text
+    }, '*');
+  } catch (error) {
+    pendingFillRequestId = 0;
+    appendPageReaderStatus('无法填充输入框');
+    return;
+  }
+
+  pendingFillTimer = setTimeout(() => {
+    pendingFillTimer = null;
+    if (pendingFillRequestId !== requestId) return;
+    pendingFillRequestId = 0;
+    appendPageReaderStatus('未找到可填充的输入框');
+  }, 1500);
+}
+
+function handleFillResultMessage(event) {
+  const data = event && event.data;
+  if (!data || data.source !== 'deepseek-sidebar' || data.type !== 'fill-input-result') return;
+  if (data.requestId !== pendingFillRequestId) return;
+  const frame = currentAppFrame();
+  if (!frame || frame.contentWindow !== event.source) return;
+  pendingFillRequestId = 0;
+  if (pendingFillTimer !== null) {
+    clearTimeout(pendingFillTimer);
+    pendingFillTimer = null;
+  }
+  appendPageReaderStatus(data.ok ? '已填充到输入框' : '未找到可填充的输入框');
+}
+
+window.addEventListener('message', handleFillResultMessage, true);
 
 async function copyCurrentPageText() {
   if (!currentPageText) {

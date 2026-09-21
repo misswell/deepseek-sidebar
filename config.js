@@ -9,6 +9,7 @@ const VISIBILITY_KEY = 'deepseek-sidebar-visibility';
 const ORDER_KEY = 'deepseek-sidebar-order';
 const HARNESS_URL_KEY = 'deepseek-sidebar-harness-url';
 const HARNESS_TOKEN_KEY = 'deepseek-sidebar-harness-token';
+const PER_TAB_SIDEBAR_KEY = 'deepseek-sidebar-per-tab-sidebar';
 const DEFAULT_HARNESS_URL = DeepSeekHarnessProtocol.DEFAULT_HARNESS_URL;
 
 const appList = document.getElementById('appList');
@@ -22,6 +23,7 @@ const harnessStatusEl = document.getElementById('harnessStatus');
 const copyHarnessInstallCommandBtn = document.getElementById('copyHarnessInstallCommand');
 const harnessInstallAlertEl = document.getElementById('harnessInstallAlert');
 const harnessInstallAlertDetailEl = document.getElementById('harnessInstallAlertDetail');
+const perTabSidebarToggle = document.getElementById('perTabSidebar');
 const HARNESS_INSTALL_COMMAND = './scripts/install-dsh-bridge.sh';
 
 let currentVisibility = {};
@@ -99,16 +101,16 @@ function loadSettings() {
       VISIBILITY_KEY,
       ORDER_KEY,
       HARNESS_URL_KEY,
-      HARNESS_TOKEN_KEY
+      HARNESS_TOKEN_KEY,
+      PER_TAB_SIDEBAR_KEY
     ], (result) => {
       const savedVis = result[VISIBILITY_KEY];
-      if (savedVis && typeof savedVis === 'object') {
-        currentVisibility = savedVis;
-      } else {
-        APPS.forEach(app => { currentVisibility[app.id] = true; });
-      }
+      currentVisibility = Object.assign({}, savedVis && typeof savedVis === 'object' ? savedVis : {});
       APPS.forEach(app => {
-        if (typeof currentVisibility[app.id] !== 'boolean') currentVisibility[app.id] = true;
+        // Unset apps follow the catalog default: Harness and 有道词典 start off.
+        if (typeof currentVisibility[app.id] !== 'boolean') {
+          currentVisibility[app.id] = DeepSeekSidebarApps.visibleByDefault(app);
+        }
       });
       const savedOrder = result[ORDER_KEY];
       if (Array.isArray(savedOrder)) {
@@ -127,13 +129,15 @@ function loadSettings() {
       }
       harnessTokenInput.value = typeof result[HARNESS_TOKEN_KEY] === 'string'
         ? result[HARNESS_TOKEN_KEY] : '';
+      perTabSidebarToggle.checked = result[PER_TAB_SIDEBAR_KEY] !== false;
       renderAppList();
     });
   } catch (e) {
-    APPS.forEach(app => { currentVisibility[app.id] = true; });
+    APPS.forEach(app => { currentVisibility[app.id] = DeepSeekSidebarApps.visibleByDefault(app); });
     currentOrder = [...DEFAULT_ORDER];
     harnessUrlInput.value = DEFAULT_HARNESS_URL;
     harnessTokenInput.value = '';
+    perTabSidebarToggle.checked = true;
     renderAppList();
   }
 }
@@ -166,18 +170,33 @@ function saveSettings() {
   }
 }
 
+function savePerTabSidebar() {
+  try {
+    chrome.storage.local.set({ [PER_TAB_SIDEBAR_KEY]: perTabSidebarToggle.checked }, () => {
+      void chrome.runtime.lastError;
+      statusEl.textContent = '侧边栏行为已保存 ✓';
+      setTimeout(() => { statusEl.textContent = ''; }, 2000);
+    });
+  } catch (e) {
+    statusEl.textContent = '保存失败';
+  }
+}
+
 function resetSettings() {
-  DEFAULT_ORDER.forEach(id => { currentVisibility[id] = true; });
+  // "Restore defaults" restores the shipped defaults too, not "everything on".
+  APPS.forEach(app => { currentVisibility[app.id] = DeepSeekSidebarApps.visibleByDefault(app); });
   currentOrder = [...DEFAULT_ORDER];
   harnessUrlInput.value = DEFAULT_HARNESS_URL;
   harnessTokenInput.value = '';
+  perTabSidebarToggle.checked = true;
   renderAppList();
   try {
     chrome.storage.local.set({
       [VISIBILITY_KEY]: currentVisibility,
       [ORDER_KEY]: currentOrder,
       [HARNESS_URL_KEY]: DEFAULT_HARNESS_URL,
-      [HARNESS_TOKEN_KEY]: ''
+      [HARNESS_TOKEN_KEY]: '',
+      [PER_TAB_SIDEBAR_KEY]: true
     }, () => {
       statusEl.textContent = '已恢复默认 ✓';
       setTimeout(() => { statusEl.textContent = ''; }, 2000);
@@ -357,5 +376,6 @@ saveBtn.addEventListener('click', saveSettings);
 resetBtn.addEventListener('click', resetSettings);
 testHarnessBtn.addEventListener('click', testHarnessConnection);
 copyHarnessInstallCommandBtn.addEventListener('click', () => { void copyHarnessInstallCommand(); });
+perTabSidebarToggle.addEventListener('change', savePerTabSidebar);
 
 loadSettings();

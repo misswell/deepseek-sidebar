@@ -3,6 +3,9 @@
 
   const PANEL_PATH = 'sidepanel.html';
   const TAB_STATE_PREFIX = 'deepseek-sidebar-tab-state:';
+  // Must match tab-state.js SHARED_SLOT: the unified-sidebar mode stores every
+  // tab's panel state under this single slot.
+  const SHARED_STATE_SLOT = 'shared';
 
   function tabId(value) {
     const numeric = typeof value === 'number' ? value : Number(value);
@@ -15,13 +18,16 @@
   }
 
   function stateStorageKey(value) {
+    if (value === SHARED_STATE_SLOT) return `${TAB_STATE_PREFIX}${SHARED_STATE_SLOT}`;
     const id = tabId(value);
     return id === null ? null : `${TAB_STATE_PREFIX}${id}`;
   }
 
-  function tabIdFromStateStorageKey(key) {
+  function slotFromStateStorageKey(key) {
     if (typeof key !== 'string' || !key.startsWith(TAB_STATE_PREFIX)) return null;
-    return tabId(key.slice(TAB_STATE_PREFIX.length));
+    const rest = key.slice(TAB_STATE_PREFIX.length);
+    if (rest === SHARED_STATE_SLOT) return SHARED_STATE_SLOT;
+    return tabId(rest);
   }
 
   function contextForDocument(contexts, documentId) {
@@ -38,9 +44,10 @@
   const api = {
     PANEL_PATH,
     TAB_STATE_PREFIX,
+    SHARED_STATE_SLOT,
     panelOptionsForTab,
     stateStorageKey,
-    tabIdFromStateStorageKey,
+    slotFromStateStorageKey,
     contextForDocument
   };
 

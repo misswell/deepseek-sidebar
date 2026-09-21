@@ -84,14 +84,18 @@
     const candidates = protocol.localHarnessCandidateUrls(normalized);
     const urls = candidates.length > 0 ? candidates : [normalized];
     const results = await Promise.all(urls.map(url => probe(url, options)));
-    // A bridge-capable instance is more useful to the extension than a page
-    // that can only be embedded, so rank bridge-config results first.
+    // A DSH build that requires browser authentication answers the ordinary page
+    // with 401 while /ext/bridge-config stays public. Prefer an instance whose page
+    // can actually be embedded, then borrow a bridge URL when one is available, so
+    // the sidebar iframe never points at a URL that only returns the auth prompt.
+    const pageResults = results.filter(result => result.pageDetected);
     const bridgeResult = results.find(result => result.bridgeUrl);
-    const pageResult = results.find(result => result.pageDetected);
-    const selected = bridgeResult || pageResult;
+    const pageResult = pageResults.find(result => result.bridgeUrl) || pageResults[0] || null;
+    const selected = pageResult || bridgeResult;
     return {
       baseUrl: selected ? selected.baseUrl : normalized,
-      bridgeUrl: selected ? selected.bridgeUrl : null,
+      bridgeUrl: (pageResult && pageResult.bridgeUrl) ||
+        (bridgeResult ? bridgeResult.bridgeUrl : null),
       pageDetected: Boolean(pageResult),
       detected: Boolean(selected),
       candidates: urls

@@ -952,6 +952,97 @@
     return { ok: true, type, selector: action.selector };
   }
 
+  // The sidebar's picker posts the text of a picked page element into the AI
+  // site (or Harness page) it is currently showing. Each sidebar app frame runs
+  // this bridge as a content script, so it can fill that frame's own composer.
+  const SIDEBAR_MESSAGE_SOURCE = 'deepseek-sidebar';
+  const SIDEBAR_FILL_REQUEST = 'fill-input';
+  const SIDEBAR_FILL_RESULT = 'fill-input-result';
+
+  function findSidebarComposer() {
+    const preferred = document.querySelector('[data-composer-input]');
+    if (preferred && isVisible(preferred)) return preferred;
+    return nativeFindComposer();
+  }
+
+  function writeComposerText(element, text) {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      element.focus();
+      nativeSetValue(element, text);
+      return true;
+    }
+    if (!(element instanceof HTMLElement)) return false;
+    // An inert composer (for example a Harness page with no open session)
+    // reports role="textbox" without being editable; refuse to pretend.
+    if (!element.isContentEditable) return false;
+
+    element.focus();
+    const selection = window.getSelection();
+    let inserted = false;
+    if (selection && typeof document.execCommand === 'function') {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      try {
+        // Lexical/ProseMirror composers reconcile execCommand insertions into
+        // their own state; assigning textContent alone gets overwritten.
+        inserted = document.execCommand('insertText', false, text);
+      } catch (error) {
+        inserted = false;
+      }
+    }
+    if (!inserted) {
+      element.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        inputType: 'insertText',
+        data: text
+      }));
+      element.textContent = text;
+      element.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        composed: true,
+        inputType: 'insertText',
+        data: text
+      }));
+    }
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    if (selection) selection.removeAllRanges();
+    return true;
+  }
+
+  function fillSidebarComposer(text) {
+    const composer = findSidebarComposer();
+    if (!composer) return { ok: false, reason: 'composer-not-found' };
+    try {
+      const ok = writeComposerText(composer, text);
+      return { ok, reason: ok ? '' : 'composer-not-editable' };
+    } catch (error) {
+      return { ok: false, reason: error && error.message ? error.message : 'fill-failed' };
+    }
+  }
+
+  const sidebarFillListener = (event) => {
+    const data = event && event.data;
+    if (!data || data.source !== SIDEBAR_MESSAGE_SOURCE || data.type !== SIDEBAR_FILL_REQUEST) return;
+    // Only the sidebar may fill the composer: it is this frame's parent window.
+    if (event.source !== window.parent) return;
+    const result = fillSidebarComposer(typeof data.text === 'string' ? data.text : '');
+    if (!window.parent || window.parent === window) return;
+    try {
+      window.parent.postMessage({
+        source: SIDEBAR_MESSAGE_SOURCE,
+        type: SIDEBAR_FILL_RESULT,
+        requestId: data.requestId,
+        ok: result.ok,
+        reason: result.reason || ''
+      }, '*');
+    } catch (error) {}
+  };
+  window.addEventListener('message', sidebarFillListener);
+
   const legacyMessageListener = (message, sender, sendResponse) => {
     if (!message || message.source !== 'deepseek-sidebar-harness-page') return undefined;
     Promise.resolve()
@@ -985,6 +1076,7 @@
   window.__deepseekSidebarPageBridgeDispose = () => {
     try { chrome.runtime.onMessage.removeListener(legacyMessageListener); } catch (error) {}
     try { chrome.runtime.onMessage.removeListener(nativeMessageListener); } catch (error) {}
+    window.removeEventListener('message', sidebarFillListener);
     delete window.__deepseekSidebarPageBridgeDispose;
     delete window.__deepseekSidebarPageBridgeInstalled;
   };

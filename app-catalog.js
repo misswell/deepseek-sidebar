@@ -1,19 +1,27 @@
 (function (root) {
   'use strict';
 
+  // `defaultHidden` keeps an app out of the toolbar on a fresh install; the
+  // settings page can still switch it on, and an explicit user choice always wins
+  // over this default. Harness and 有道词典 are off by default so a new install
+  // starts with the six chat sites.
   const apps = [
-    { id: 'harness', name: 'DeepSeek Harness', harness: true, displayUrl: '本地 / 局域网服务', icon: 'icons/icon-deep.png', color: '#8b5cf6', multi: false },
+    { id: 'harness', name: 'DeepSeek Harness', harness: true, displayUrl: '本地 / 局域网服务', icon: 'icons/icon-deep.png', color: '#8b5cf6', multi: false, defaultHidden: true },
     { id: 'deepseek', name: 'DeepSeek', url: 'https://chat.deepseek.com/', icon: 'icons/deepseek.png', color: '#4d6bfe', multi: true },
     { id: 'zhipu', name: '智谱', url: 'https://chat.z.ai/', icon: 'icons/zhipu.svg', color: '#2563eb', multi: true },
     { id: 'qianwen', name: '千问', url: 'https://www.qianwen.com/', icon: 'icons/qianwen.png', color: '#7c3aed', multi: true },
     { id: 'kimi', name: 'Kimi', url: 'https://www.kimi.com/', icon: 'icons/kimi.svg', color: '#b9c7ff', multi: true },
     { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/', icon: 'icons/chatgpt.png', color: '#10a37f', multi: true },
     { id: 'gemini', name: 'Gemini', url: 'https://gemini.google.com/app', icon: 'icons/gemini.png', color: '#4285f4', multi: true },
-    { id: 'youdao', name: '有道词典', url: 'https://dict.youdao.com/m/', icon: 'icons/youdao.svg', color: '#e11d48', multi: false }
+    { id: 'youdao', name: '有道词典', url: 'https://dict.youdao.com/m/', icon: 'icons/youdao.svg', color: '#e11d48', multi: false, defaultHidden: true }
   ].map(app => Object.freeze({ ...app }));
 
   function byId(id) {
     return apps.find(app => app.id === id) || null;
+  }
+
+  function visibleByDefault(app) {
+    return !app || app.defaultHidden !== true;
   }
 
   function matchesFrame(id, value) {
@@ -34,7 +42,8 @@
     apps,
     multiApps: apps.filter(app => app.multi),
     byId,
-    matchesFrame
+    matchesFrame,
+    visibleByDefault
   };
 
   if (typeof module === 'object' && module && module.exports) module.exports = api;

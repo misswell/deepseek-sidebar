@@ -36,6 +36,25 @@ test('keeps application, zoom and Harness session independent per tab', () => {
   });
 });
 
+test('maps every tab onto one shared slot in unified sidebar mode', () => {
+  let map = state.setTabState({}, state.SHARED_SLOT, { app: 'chatgpt', zoom: 80 });
+  map = state.setFrameUrl(map, state.SHARED_SLOT, 'chatgpt', 'https://chatgpt.com/c/demo');
+
+  // The shared slot round-trips like a per-tab slot.
+  assert.deepEqual(state.getTabState(map, state.SHARED_SLOT), {
+    app: 'chatgpt',
+    zoom: 80,
+    harnessSessionId: '',
+    frameUrls: { chatgpt: 'https://chatgpt.com/c/demo' }
+  });
+  // The shared slot never aliases a numeric tab id.
+  assert.equal(state.getTabState(map, 11), null);
+
+  // Closing a tab must never wipe the shared sidebar state.
+  map = state.removeTabState(map, 11);
+  assert.equal(state.getFrameUrl(map, state.SHARED_SLOT, 'chatgpt'), 'https://chatgpt.com/c/demo');
+});
+
 test('preserves a separate conversation route for each tab and app', () => {
   let map = state.setFrameUrl({}, 11, 'harness', 'http://127.0.0.1:3080/conversations/a');
   map = state.setFrameUrl(map, 22, 'harness', 'http://127.0.0.1:3080/conversations/b');
