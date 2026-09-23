@@ -464,6 +464,8 @@ test('renders every toolbar action with one shared inline SVG icon set', () => {
   // One rule owns the rendered size, stroke and color of the whole set.
   assert.match(sidepanel, /--toolbar-icon-size: 10\.5px;/);
   assert.match(sidepanel, /--toolbar-action-size: 15px;/);
+  // The label box must stay wider than four tabular digits, or they overflow onto − and +.
+  assert.match(sidepanel, /#zoom-label \{[\s\S]*?font-size: 11px;[\s\S]*?flex: 0 0 34px;[\s\S]*?min-width: 34px;/);
   assert.match(sidepanel, /\.zoom-controls button > svg \{[\s\S]*?width: var\(--toolbar-icon-size\);[\s\S]*?stroke-width: 2\.7;/);
   // No platform font glyphs or bespoke bars left in the toolbar.
   assert.doesNotMatch(toolbar, /⌖|↻|⚙|−|\+<\/button>/);
